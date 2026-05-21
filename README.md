@@ -6,7 +6,7 @@
 
 ## 安装
 
-下载链接见 [`urls.conf`](urls.conf) 中的 `DOWNLOAD_URL`。
+下载链接: [`agent-doc-system.zip`](https://github.com/Keye3Tuido/agent-doc-system/releases/latest/download/agent-doc-system.zip) 
 
 ### 第一步：全局安装（所有 IDE 通用）
 
@@ -161,6 +161,6 @@ agent-doc-system/
 
 ### 跨机器复用全局配置
 
-将 `~/.agent-docs/` 整个目录打包拷贝到新机器即可（含 `manual/`、`scripts/`、`skills/`、`templates/`、`installers/`）。
+将 `~/.agent-docs/` 整个目录打包拷贝到新机器即可（含 `manual/`、`scripts/`、`skills/`、`templates/`、`installers/`和`urls.conf`）。
 
 项目文档库不在全局配置中，各项目独立维护。
