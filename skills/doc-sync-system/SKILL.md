@@ -53,7 +53,7 @@ description: "Download and install the latest doc-system skill package (skills +
 
 全局 `~/.agent-docs/` 更新完成后（无论经由阶段 A 还是阶段 B），执行以下步骤将变更同步到各 IDE 的 skill 目录。
 
-1. **检测当前 IDE 的安装方式**。agent 根据自身运行环境确定当前 IDE 的 skill 安装目录（如 Kiro 对应 `~/.kiro/skills/`，Claude Code 对应 `~/.claude/commands/`，DeepSeek 对应 `~/.deepseek/skills/`），然后检查该目录中与 `~/.agent-docs/skills/` 同名的条目类型：
+1. **检测当前 IDE 的安装方式**。agent 根据自身运行环境确定当前 IDE 的 skill 安装目录（如 Kiro 对应 `~/.kiro/skills/`，Claude Code 对应 `~/.claude/commands/`，DeepSeek 对应 `~/.deepseek/skills/`，Cursor 对应 `~/.cursor/skills/`，VSCode/GitHub Copilot 对应 `~/.copilot/skills/`），然后检查该目录中与 `~/.agent-docs/skills/` 同名的条目类型：
    - 若为**软链接**（`os.path.islink()` 为 True）→ 标记为 `symlink`
    - 若为**普通文件/目录**（非软链接） → 标记为 `copy`
    - 若目录不存在或为空 → 标记为 `not_installed`，跳过
@@ -74,14 +74,7 @@ description: "Download and install the latest doc-system skill package (skills +
    - **不删除 IDE 目录中用户自行添加的、不在 `~/.agent-docs/skills/` 中的条目**。
    - 输出同步摘要。
 
-4. **Cursor 特殊处理**：Cursor 不使用独立 skill 目录，而是通过 `.cursorrules` 中的 snippet 引导 agent 读取 `~/.agent-docs/skills/`。
-   - 若当前环境为 Cursor，检查项目 `.cursorrules` 中是否存在 `BEGIN agent-doc-system` / `END agent-doc-system` 标记。
-   - 若存在标记，对比当前 snippet 内容与 `~/.agent-docs/templates/cursorrules-snippet.md` 的最新内容：
-     - 若内容不同（模板更新、skill 列表增删等） → 提示用户重新运行 `python3 ~/.agent-docs/installers/install-cursor.py [project_root]` 以更新 snippet。
-     - 若内容一致 → 跳过，skill 内容已通过全局路径自动生效。
-   - 若不存在标记 → 标记为 `not_installed`，跳过。
-
-5. **异常处理**：
+4. **异常处理**：
    - 若 IDE 目录中同一 skill 既有软链接又有普通文件（混合状态），警告用户并跳过该条目，建议手动清理。
    - 若复制失败，报告错误但不回滚全局安装（全局安装已完成且有备份）。
 

@@ -2,7 +2,7 @@
 
 基于项目的 git submodule 结构自动构建文档库，描述各模块的职责与架构。以远程 URL、仓库、分支作为文档划分依据；以文档内容与实际代码是否一致、远端 commit sha 与文档记录是否一致作为更新依据。
 
-系统为纯 skill + 存储形态，不依赖任何 IDE 的自动加载机制。每个 doc-* skill 在执行前主动读取手册，支持 Claude Code、Cursor、Kiro IDE 作为运行环境。
+系统为纯 skill + 存储形态，不依赖任何 IDE 的自动加载机制。每个 doc-* skill 在执行前主动读取手册，支持 Claude Code、Cursor、Kiro IDE、VSCode (GitHub Copilot)、Deepseek TUI 作为运行环境。
 
 ## 安装
 
@@ -75,22 +75,37 @@ done
 
 安装后直接使用 `/doc-init`、`/doc-update` 等 skill。
 
+#### VSCode (GitHub Copilot)
+
+推荐方式：**软链接**
+
+```bash
+for skill in ~/.agent-docs/skills/*/; do
+  ln -sf "$skill" ~/.copilot/skills/$(basename "$skill")
+done
+```
+
+安装后 Copilot Agent 会自动发现并加载 skill。
+
 #### Cursor
 
-```bash
-# 将 snippet 追加到项目 .cursorrules（带 BEGIN/END 标记，可升级/卸载）
-python3 agent-doc-system/installers/install-cursor.py [project_root]
-```
-
-Cursor 无 slash command，通过 `.cursorrules` 中的 snippet 引导 agent 读取 `~/.agent-docs/skills/<name>/SKILL.md` 执行等价操作。
-
-全局安装完成后，也可使用全局路径：
+推荐方式：**复制**（Cursor 从 2.4 起原生支持 Agent Skills 标准，skill 目录为 `~/.cursor/skills/`）
 
 ```bash
-python3 ~/.agent-docs/installers/install-cursor.py [project_root]
+for skill in ~/.agent-docs/skills/*/; do
+  cp -R "$skill" ~/.cursor/skills/$(basename "$skill")
+done
 ```
 
-卸载：`python3 ~/.agent-docs/installers/install-cursor.py [project_root] --remove`
+或使用软链接：
+
+```bash
+for skill in ~/.agent-docs/skills/*/; do
+  ln -sf "$skill" ~/.cursor/skills/$(basename "$skill")
+done
+```
+
+安装后 Cursor 会自动发现并加载 skill，在 Agent 对话中输入 `/` 搜索 skill 名称即可手动调用。
 
 ## 升级
 
@@ -100,9 +115,8 @@ python3 ~/.agent-docs/installers/install-cursor.py [project_root]
 
 1. 下载最新版本并更新全局 `~/.agent-docs/`（备份 → dry-run → 用户确认 → 覆写）
 2. 同步当前 IDE 的 skill 目录：
-   - **软链接方式**（如 Claude Code、DeepSeek）：无需额外操作，自动生效。
-   - **复制方式**（如 Kiro）：检测变更并提示用户确认后覆盖更新。
-   - **Cursor**：对比 `.cursorrules` 中现有 snippet 与最新模板，若有差异则提示重新运行安装脚本。
+   - **软链接方式**（如 Claude Code、DeepSeek、Cursor、VSCode/Copilot）：无需额外操作，自动生效。
+   - **复制方式**（如 Kiro、Cursor）：检测变更并提示用户确认后覆盖更新。
 
 ### 方式二：手动运行脚本
 
@@ -114,7 +128,6 @@ python3 ~/.agent-docs/installers/install-global.py --upgrade
 
 - **软链接方式**：无需额外操作。
 - **复制方式**：重新执行复制命令（参见"第二步"中对应 IDE 的 `cp -R` 命令）。
-- **Cursor**：重新运行 `python3 ~/.agent-docs/installers/install-cursor.py [project_root]`。
 
 ## Skills
 
@@ -138,8 +151,8 @@ agent-doc-system/
 ├── manual/          # 全局手册（doc-system.md）
 ├── scripts/         # 工具脚本
 ├── skills/          # 9 个 skill（含 doc-context）
-├── installers/      # install-global.py, install-cursor.py
-└── templates/       # _index.md, main-module.md, cursorrules-snippet.md, claude-md-snippet.md
+├── installers/      # install-global.py
+└── templates/       # _index.md, main-module.md, claude-md-snippet.md
 ```
 
 安装后对应 `~/.agent-docs/` 下的同名子目录；项目文档库存放在 `<project>/.agent-docs/`。
