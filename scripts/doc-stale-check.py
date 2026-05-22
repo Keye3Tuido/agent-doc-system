@@ -183,7 +183,7 @@ def main():
             status = "ERROR"
         elif branch_gone:
             status = "BRANCH_GONE(OK)" if remote_sha[:10] == doc_commit else "BRANCH_GONE(STALE)"
-        elif remote_sha[:40] == doc.get("commit", "")[:40]:
+        elif remote_sha[:10] == doc.get("commit", "")[:10]:
             status = "OK"
         else:
             status = "STALE"
