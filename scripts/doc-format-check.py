@@ -6,7 +6,7 @@ Usage: python3 ~/.agent-docs/scripts/doc-format-check.py [project_root] [--docs-
 
 Checks:
   - Required fields present (schema_version, agent_load, repo, origin_host, owner, name, branch, commit)
-  - commit is 40-char hex
+  - commit is 10-40 char hex
   - No duplicate (origin_host, owner, name, branch) four-tuples among active docs
   - Archived docs must have: archived_at, archived_reason, origin_path_in_main
 
@@ -96,7 +96,7 @@ def main():
 
         # Commit format
         commit = meta.get("commit", "")
-        if commit and not re.match(r"^[0-9a-f]{40}$", str(commit)):
+        if commit and not re.match(r"^[0-9a-f]{10,40}$", str(commit)):
             all_issues.append(f"{fname}: INVALID_COMMIT({commit[:20]}...)")
 
         # Archived-specific checks
