@@ -18,12 +18,18 @@ description: "Load project documentation library as context before answering que
    Read <project_root>/.agent-docs/doc-library/main-module.md
    ```
 
-3. 根据用户问题中提到的路径、模块名或子模块 slug，匹配 `_index.md` 中的记录，选择性读取相关子模块文档：
-   ```
-   Read <project_root>/.agent-docs/doc-library/modules/<matched-slug>.md
-   ```
+3. 自动识别当前会话关联的子模块并加载对应文档：
+   - 从 IDE 环境上下文中获取当前打开的文件列表（active editor file、open editor files）。
+   - 将每个打开文件的路径与 `_index.md` 活跃子模块表中的 `repo` 路径做前缀匹配，确定其所属子模块。
+   - 对所有匹配到的子模块，自动读取对应文档：
+     ```
+     Read <project_root>/.agent-docs/doc-library/modules/<matched-slug>.md
+     ```
+   - 无需用户显式指定模块名；即使用户未提及任何路径，只要打开的文件落在某个子模块目录内，就主动加载该子模块文档。
 
-4. 将加载的文档内容融入对用户问题的回答。
+4. 根据用户问题中**额外**提到的路径、模块名或子模块 slug（步骤 3 未覆盖的），补充读取相关子模块文档。
+
+5. 将加载的文档内容融入对用户问题的回答。
 
 ## 硬约束
 
