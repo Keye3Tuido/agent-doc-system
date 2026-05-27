@@ -6,6 +6,7 @@ Usage: python3 ~/.agent-docs/scripts/doc-format-check.py [project_root] [--docs-
 
 Checks:
   - Required fields present (schema_version, agent_load, repo, origin_host, owner, name, branch, commit)
+  - schema_version value matches current version
   - commit is 10-40 char hex
   - No duplicate (origin_host, owner, name, branch) four-tuples among active docs
   - Archived docs must have: archived_at, archived_reason, origin_path_in_main
@@ -22,7 +23,9 @@ REQUIRED_FIELDS = ["schema_version", "agent_load", "repo", "origin_host", "owner
 ARCHIVED_REQUIRED_FIELDS = ["archived_at", "archived_reason", "origin_path_in_main"]
 VALID_ARCHIVED_REASONS = [
     "removed-from-gitmodules",
+    "imported-from-other-project",
 ]
+CURRENT_SCHEMA_VERSION = "3"
 
 
 def extract_meta(filepath):
@@ -93,6 +96,11 @@ def main():
         for field in REQUIRED_FIELDS:
             if field not in meta or meta[field] is None or meta[field] == "":
                 all_issues.append(f"{fname}: MISSING_FIELD({field})")
+
+        # schema_version value check
+        sv = meta.get("schema_version", "")
+        if sv and str(sv) != CURRENT_SCHEMA_VERSION:
+            all_issues.append(f"{fname}: OUTDATED_SCHEMA_VERSION({sv}, expected {CURRENT_SCHEMA_VERSION})")
 
         # Commit format
         commit = meta.get("commit", "")
