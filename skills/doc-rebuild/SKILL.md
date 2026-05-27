@@ -24,7 +24,9 @@ description: "Fully rebuild the project documentation library from scratch. Clea
 6. 执行清理动作。
 7. 执行 §13 第一阶段：运行 `python3 ~/.agent-docs/scripts/doc-scaffold.py` 为每个子模块生成骨架，输出子模块清单（含路径、origin URL、branch、一句话定位草案）。
 8. 等用户再次确认清单后，进入第二阶段：逐份填充文档内容。每份文档：
-   - 扫描对应子模块源码，提取 `structure` 字段（deps/exports/inner），更新 yaml frontmatter。
+   - **使用手册当前 schema 版本**：读取 `~/.agent-docs/manual/doc-system.md` 中的当前 schema 版本，所有新建文档的 `schema_version` 字段必须使用该版本。
+   - **按当前模板生成**：对照 `~/.agent-docs/templates/` 中的模板文件和手册§9的schema定义，确保文档结构和字段完整符合当前版本要求。
+   - 扫描对应子模块源码，提取 `structure` 字段（deps/exports/inner），填充到 yaml frontmatter。
    - 用 `fs_write` 写入 markdown 内容到目标路径。
    - 立即调用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 兜底（自动检测并修复 GBK / BOM / CRLF）。
 9. 全部落地后，**自动**把 `_index.md` 顶部 `project_config.initial_bootstrap_done` 改为 `true`。

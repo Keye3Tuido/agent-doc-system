@@ -40,7 +40,7 @@ import urllib.request
 import zipfile
 
 AGENT_DOCS_HOME = os.path.expanduser("~/.agent-docs")
-TARGETS = ("manual", "scripts", "skills", "templates", "installers")
+TARGETS = ("manual", "scripts", "skills", "templates", "installers", "urls.conf", "README.md")
 DOWNLOAD_TIMEOUT_SEC = 60
 
 
@@ -102,6 +102,25 @@ def collect_changes(src_root):
     added, replaced, unchanged = [], [], []
     for target in TARGETS:
         src_t = os.path.join(src_root, target)
+        if not os.path.exists(src_t):
+            continue
+
+        # Handle single files (urls.conf, README.md)
+        if os.path.isfile(src_t):
+            dst_t = os.path.join(AGENT_DOCS_HOME, target)
+            entry = (target, "", src_t, dst_t)
+            if not os.path.exists(dst_t):
+                added.append(entry)
+            else:
+                try:
+                    with open(src_t, "rb") as a, open(dst_t, "rb") as b:
+                        same = a.read() == b.read()
+                except Exception:
+                    same = False
+                (unchanged if same else replaced).append(entry)
+            continue
+
+        # Handle directories (manual, scripts, skills, templates, installers)
         if not os.path.isdir(src_t):
             continue
         dst_t = os.path.join(AGENT_DOCS_HOME, target)
@@ -131,6 +150,8 @@ def make_backup():
         src = os.path.join(AGENT_DOCS_HOME, t)
         if os.path.isdir(src):
             shutil.copytree(src, os.path.join(backup_root, t))
+        elif os.path.isfile(src):
+            shutil.copy2(src, os.path.join(backup_root, t))
     return backup_root
 
 

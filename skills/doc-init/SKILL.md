@@ -12,7 +12,7 @@ description: "Initialize the documentation library when the current project has 
    - 若存在 `_index.md` 或 `doc-library/`，**拒绝执行**。在第一条回复正文最开头打印一行 `> [doc-init-blocked] 文档库已存在，请改用 /doc-rebuild`，结束。
    - 若不存在，继续。
 3. 在第一条回复中向用户列出**将要执行的动作清单**（不出 diff，因为这一步只是拷模板 + 改 inclusion + 填 origin，纯结构化操作）：
-   - 拷贝 `~/.agent-docs/templates/_index.md` → `<project>/.agent-docs/_index.md`，把 `agent_load: manual` 改为 `agent_load: always`。
+   - 拷贝 `~/.agent-docs/templates/_index.md` → `<project>/.agent-docs/_index.md`，把 `agent_load: manual` 改为 `agent_load: always`。模板文件已包含当前 schema 版本。
    - 拷贝 `~/.agent-docs/templates/main-module.md` → `<project>/.agent-docs/doc-library/main-module.md`，把 `agent_load: manual` 改为 `agent_load: always`。
    - 创建空目录 `doc-library/modules/`，放一个 `.gitkeep`。
    - 解析项目主仓库 origin 并填入 `_index.md` 的 `project_config.repo_root_marker`。

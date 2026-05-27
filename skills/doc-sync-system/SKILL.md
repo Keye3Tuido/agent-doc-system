@@ -1,6 +1,6 @@
 ---
 name: doc-sync-system
-description: "Download and install the latest doc-system skill package (skills + scripts + steering) from a remote URL. Backs up the existing ~/.agent-docs/{skills,scripts,manual} before overwriting; falls back to agent-driven install if the helper script fails. Use when the user asks to update, refresh, fetch, sync, or reinstall doc-system skills/scripts."
+description: "Download and install the latest doc-system package (skills + scripts + manual + templates + installers + urls.conf + README.md) from a remote URL. Backs up the existing ~/.agent-docs/ content before overwriting; falls back to agent-driven install if the helper script fails. Use when the user asks to update, refresh, fetch, sync, or reinstall the doc-system."
 ---
 
 > 本 skill 是全局 `~/.agent-docs/manual/doc-system.md` 的执行入口，对应章节：§15（关联 skill）+ §16（工具脚本）。完整规则以手册为准，本文件只列执行步骤，不复述规则。
@@ -25,7 +25,7 @@ description: "Download and install the latest doc-system skill package (skills +
    ```
    python3 ~/.agent-docs/scripts/doc-sync-system.py [--url <url>]
    ```
-4. 脚本会自动备份当前 `~/.agent-docs/{skills,scripts,manual}` 到 `~/.agent-docs/.backup/<时间戳>/`，然后逐文件覆写。
+4. 脚本会自动备份当前 `~/.agent-docs/` 的所有内容（skills、scripts、manual、templates、installers、urls.conf、README.md）到 `~/.agent-docs/.backup/<时间戳>/`，然后逐文件覆写。
 5. 把脚本的安装摘要（含 backup 路径）转给用户。
 6. 安装结束后，**重新加载手册** `~/.agent-docs/manual/doc-system.md`（提醒用户：下一对话起新规则才生效；当前对话内若已加载旧手册可继续按旧规则收尾）。
 
@@ -35,7 +35,7 @@ description: "Download and install the latest doc-system skill package (skills +
 
 1. 用 `web_fetch`（或 `urllib.request`/`curl` 单行命令）下载 zip 到临时目录（如 `<project>/.agent-docs/.tmp/fetch-skills-<时间戳>.zip`）。
 2. 解压到临时目录（如 `<project>/.agent-docs/.tmp/fetch-skills-extract-<时间戳>/`）。
-3. 检查 zip 顶层是否包含 `skills/` / `scripts/` / `manual/` 之一（也可能多一层 wrapper 目录）；若结构异常立即停止并报告。
+3. 检查 zip 顶层是否包含 `skills/`、`scripts/`、`manual/`、`templates/`、`installers/`、`urls.conf`、`README.md` 之一（也可能多一层 wrapper 目录）；若结构异常立即停止并报告。
 4. 比对 zip 内文件与 `~/.agent-docs` 现有同路径文件：
    - 不存在 → ADDED
    - 内容相同（字节级） → UNCHANGED
@@ -43,7 +43,7 @@ description: "Download and install the latest doc-system skill package (skills +
 5. 在第一条回复正文最开头打印 `> [doc-fetch-pending] 阶段 B 代理安装，N 文件待覆盖，备份路径 ~/.agent-docs/.backup/<时间戳>/`。
 6. 把完整变更清单转给用户，等用户 yes 才继续。
 7. 用户确认后：
-   - 复制 `~/.agent-docs/{skills,scripts,manual}` 到 `~/.agent-docs/.backup/<时间戳>/`（用 `shutil.copytree` 或 `cp -a`，不要用 `fs_write`）。
+   - 复制 `~/.agent-docs/` 的所有内容（skills、scripts、manual、templates、installers、urls.conf、README.md）到 `~/.agent-docs/.backup/<时间戳>/`（用 `shutil.copytree` 或 `cp -a`，不要用 `fs_write`）。
    - **二进制安全拷贝**：用 `shutil.copy2(src, dst)` 或 `cp <src> <dst>` 把解压后的文件逐个搬到目标位置。**禁止使用 `fs_write` 写入 zip 抽出的内容**——`fs_write` 在中文系统有把 UTF-8 误存为 GBK 的历史 bug，会破坏 zip 包内的编码。
    - 拷贝完成后，对每个新写入的文件逐个跑 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path> --check` 兜底校验（任意一个失败就回滚到 `.backup/<时间戳>/`）。注意：`doc-encoding-check.py` 只覆盖项目级 `.agent-docs/` 目录，不适用于全局 `~/.agent-docs/` 的 skill / script 安装校验。
    - 输出最终摘要（与脚本 INSTALLED 段一致）。
@@ -83,6 +83,6 @@ description: "Download and install the latest doc-system skill package (skills +
 - **永远先备份再覆写**。无论阶段 A 还是 B，备份目录必须时间戳化、不覆盖既有备份。
 - **永远先 dry-run 再写入**。dry-run 输出必须给用户审阅，不得静默执行。
 - **只覆盖 zip 内列出的文件**。包外文件（用户自定义 skill / 脚本）不动。
-- **只动 `~/.agent-docs/{skills,scripts,manual}`**。不碰 `~/.agent-docs/specs/`、`~/.agent-docs/hooks/`、`~/.agent-docs/.backup/` 等其他目录。
+- **只动 `~/.agent-docs/` 的同步目标内容**（skills、scripts、manual、templates、installers、urls.conf、README.md）。不碰 `~/.agent-docs/specs/`、`~/.agent-docs/hooks/`、`~/.agent-docs/.backup/` 等其他目录。
 - 安装完成后必须告知用户备份路径，便于回滚。
 - 阶段 B 必须显式告知用户进入了"agent 代理安装"模式，不得伪装成脚本结果。

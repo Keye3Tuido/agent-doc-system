@@ -39,11 +39,12 @@ description: "Update existing documentation files for one or all submodules in t
 2. **Schema版本检查与升级**：
    - 检查文档yaml frontmatter中的`schema_version`字段。
    - 对比全局手册`~/.agent-docs/manual/doc-system.md`中的当前schema版本。
-   - 若文档版本低于手册版本，升级到手册版本：
-     - 更新`schema_version`字段
-     - 根据手册§9定义的schema要求，补充缺失的必需字段
-     - 对于schema v3+，确保包含`structure`字段
-   - 若文档缺少`schema_version`字段，添加为手册当前版本
+   - 若文档版本低于手册版本，**必须按新模板完整升级**，不能只改版本号：
+     - 更新`schema_version`字段到手册当前版本
+     - 对照手册§9的schema定义，补充**所有**新增字段（必填+可选）
+     - 对照`~/.agent-docs/templates/`中的模板文件，确保文档结构符合新模板要求
+     - 对于schema v3+，必须提取并填充`structure`字段（deps/exports/inner）
+   - 若文档缺少`schema_version`字段，添加为手册当前版本并按上述流程补全
 3. 若文档状态为 `ARCHIVED_BUT_ACTIVE`：去掉 `archived` / `archived_at` / `archived_reason` 字段，将其从 `_index.md` 归档区移回活跃区。
 4. **STALE 内容判定**（按手册 §4 第 6 条；仅 stale 目标走此步）：在子模块目录内执行 `git log --oneline <doc_sha>..<remote_sha>`，对照 §7 触发条件逐条审视：
    - 仅当**所有**提交均属"实现细节调整 / bug 修复 / 不影响接口/职责/数据契约/流程"时，方可只刷新 `commit` 字段。
