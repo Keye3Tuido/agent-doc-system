@@ -1,5 +1,5 @@
 ---
-schema_version: 2
+schema_version: 3
 agent_load: always
 project_config:
   repo_root_marker: "<主仓库 origin URL，例如 https://github.com/foo/Bar.git>"
