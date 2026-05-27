@@ -62,6 +62,7 @@ description: "Merge documentation libraries from one or more other projects into
 
 - 保留当前项目原有 yaml 字段。
 - `commit` 字段**重读当前项目对应子模块的远端 sha**（`git -C <module> rev-parse origin/<branch>`），不沿用旧值。
+- `structure` 字段**重新从当前项目源码提取**（执行与 doc-update 相同的提取逻辑），不沿用外部副本的 structure 数据。
 - 外部 yaml 头部一律忽略。
 
 ### 阶段 3：清单确认

@@ -15,7 +15,11 @@ description: "Check, organize, and archive the project documentation library. Ru
    ```
 2. 解析脚本输出，汇总所有问题（含 STALE / NO_DOC / ORPHAN_DOC / ARCHIVED_BUT_ACTIVE / BRANCH_GONE / 编码 / schema）。
 3. 额外检查 §10 分支合并归档（`git merge-base --is-ancestor`）和 §5 命名合规。
-4. 对 `ARCHIVED_BUT_ACTIVE` 项：提议去掉 `archived` / `archived_at` / `archived_reason` 字段，刷新 `commit`，并在 `_index.md` 中从归档区移回活跃区。
+4. **structure 字段验证**（仅对有 `structure` 字段的文档执行）：
+   - 检查 `structure.deps` 中引用的模块路径是否存在于当前项目（主仓库路径或 `.gitmodules` 中的子模块路径）。
+   - 不存在的依赖标记为警告（不阻塞，因为可能是外部库或已移除的模块）。
+   - 检查 `structure.exports` 和 `structure.inner` 的基本格式完整性（必填字段是否存在）。
+5. 对 `ARCHIVED_BUT_ACTIVE` 项：提议去掉 `archived` / `archived_at` / `archived_reason` 字段，刷新 `commit`，并在 `_index.md` 中从归档区移回活跃区。
 5. 把所有问题聚合到一张"将要执行的改动清单"，按以下分类：
    - 编码 / 换行修复：使用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 修复（自动检测 GBK/CRLF/BOM 并转换）
    - 元信息修复：`commit` 与远端不一致、必填字段缺失

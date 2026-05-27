@@ -117,7 +117,7 @@ def main():
 
     # 输出骨架
     output = f"""---
-schema_version: 2
+schema_version: 3
 agent_load: on-demand
 repo: "{origin_url}"
 origin_host: "{host}"
@@ -126,6 +126,10 @@ name: "{name}"
 branch: "{branch}"
 commit: "{remote_sha or '0' * 40}"
 origin_path_in_main: "{module_path}"
+structure:
+  deps: []
+  exports: []
+  inner: []
 ---
 
 # {name}

@@ -1,6 +1,10 @@
 ---
-schema_version: 2
+schema_version: 3
 agent_load: always
+structure:
+  deps: []
+  exports: []
+  inner: []
 ---
 
 # 主模块文档（待生成）

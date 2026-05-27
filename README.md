@@ -4,6 +4,25 @@
 
 系统为纯 skill + 存储形态，不依赖任何 IDE 的自动加载机制。每个 doc-* skill 在执行前主动读取手册，支持 Claude Code、Cursor、Kiro IDE、VSCode (GitHub Copilot)、Deepseek TUI 作为运行环境。
 
+## Schema v3 新特性
+
+**结构化关系数据（structure 字段）**
+
+从 schema v3 开始，文档 yaml frontmatter 新增可选的 `structure` 字段，用于记录模块间依赖关系和内部结构：
+
+- **deps**：依赖列表（此模块依赖哪些模块，使用了哪些符号）
+- **exports**：导出列表（此模块暴露的公共接口）
+- **inner**：内部结构（文件内的类/函数包含关系）
+
+**优势**：
+- AI 可直接读取结构化数据，无需重新扫描代码
+- 加速理解模块依赖和架构关系
+- 保持轻量（模块级粒度，不记录实现细节）
+
+**自动提取**：`/doc-update`、`/doc-rebuild`、`/doc-merge` 会自动从源码提取并更新 structure 字段。
+
+**向后兼容**：structure 为可选字段，旧版文档（schema v2）可正常使用，升级时会自动补全。
+
 ## 安装
 
 下载链接: [`agent-doc-system.zip`](https://github.com/Keye3Tuido/agent-doc-system/releases/latest/download/agent-doc-system.zip) 
