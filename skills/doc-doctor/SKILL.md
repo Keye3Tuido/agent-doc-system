@@ -19,9 +19,19 @@ description: "Check, organize, and archive the project documentation library. Ru
    - 检查 `structure.deps` 中引用的模块路径是否存在于当前项目（主仓库路径或 `.gitmodules` 中的子模块路径）。
    - 不存在的依赖标记为警告（不阻塞，因为可能是外部库或已移除的模块）。
    - 检查 `structure.exports` 和 `structure.inner` 的基本格式完整性（必填字段是否存在）。
-5. 对 `ARCHIVED_BUT_ACTIVE` 项：提议去掉 `archived` / `archived_at` / `archived_reason` 字段，刷新 `commit`，并在 `_index.md` 中从归档区移回活跃区。
-5. 把所有问题聚合到一张"将要执行的改动清单"，按以下分类：
+5. **Schema版本检查与升级**：
+   - 检查每份文档 yaml frontmatter 中的 `schema_version` 字段。
+   - 对比全局手册 `~/.agent-docs/manual/doc-system.md` 中的当前 schema 版本。
+   - 若文档版本低于手册版本，**必须按新模板完整升级**，不能只改版本号：
+     - 更新 `schema_version` 字段到手册当前版本
+     - 对照手册§9的schema定义，补充**所有**新增字段（必填+可选）
+     - 对照 `~/.agent-docs/templates/` 中的模板文件，确保文档结构符合新模板要求
+     - 对于 schema v3+，必须提取并填充 `structure` 字段（调用 `doc-structure-extract.py`）
+   - 若文档缺少 `schema_version` 字段，添加为手册当前版本并按上述流程补全
+6. 对 `ARCHIVED_BUT_ACTIVE` 项：提议去掉 `archived` / `archived_at` / `archived_reason` 字段，刷新 `commit`，并在 `_index.md` 中从归档区移回活跃区。
+7. 把所有问题聚合到一张"将要执行的改动清单"，按以下分类：
    - 编码 / 换行修复：使用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 修复（自动检测 GBK/CRLF/BOM 并转换）
+   - Schema版本升级：按新模板完整升级（更新版本号 + 补充新增字段 + 提取structure字段）
    - 元信息修复：`commit` 与远端不一致、必填字段缺失
    - 归档动作：`.gitmodules` 已不含的子模块文档标记 `archived: true`（文件留在 `modules/` 不移动）
    - 恢复动作：`ARCHIVED_BUT_ACTIVE` 的文档去掉归档标记，刷新 `commit`，移回 `_index.md` 活跃区
