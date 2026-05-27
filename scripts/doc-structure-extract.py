@@ -90,8 +90,10 @@ def detect_language(file_path):
         '.cc': 'cpp',
         '.cxx': 'cpp',
         '.c': 'c',
-        '.h': 'c',
+        '.h': 'cpp',  # .h通常用于C++头文件
         '.hpp': 'cpp',
+        '.hxx': 'cpp',
+        '.hh': 'cpp',
     }
     return lang_map.get(ext)
 
