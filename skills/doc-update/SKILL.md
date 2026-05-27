@@ -36,8 +36,16 @@ description: "Update existing documentation files for one or all submodules in t
 对每个目标（stale 子模块、主模块、粒度候选）：
 
 1. 读取当前文档。
-2. 若文档状态为 `ARCHIVED_BUT_ACTIVE`：去掉 `archived` / `archived_at` / `archived_reason` 字段，将其从 `_index.md` 归档区移回活跃区。
-3. **STALE 内容判定**（按手册 §4 第 6 条；仅 stale 目标走此步）：在子模块目录内执行 `git log --oneline <doc_sha>..<remote_sha>`，对照 §7 触发条件逐条审视：
+2. **Schema版本检查与升级**：
+   - 检查文档yaml frontmatter中的`schema_version`字段。
+   - 对比全局手册`~/.agent-docs/manual/doc-system.md`中的当前schema版本。
+   - 若文档版本低于手册版本，升级到手册版本：
+     - 更新`schema_version`字段
+     - 根据手册§9定义的schema要求，补充缺失的必需字段
+     - 对于schema v3+，确保包含`structure`字段
+   - 若文档缺少`schema_version`字段，添加为手册当前版本
+3. 若文档状态为 `ARCHIVED_BUT_ACTIVE`：去掉 `archived` / `archived_at` / `archived_reason` 字段，将其从 `_index.md` 归档区移回活跃区。
+4. **STALE 内容判定**（按手册 §4 第 6 条；仅 stale 目标走此步）：在子模块目录内执行 `git log --oneline <doc_sha>..<remote_sha>`，对照 §7 触发条件逐条审视：
    - 仅当**所有**提交均属"实现细节调整 / bug 修复 / 不影响接口/职责/数据契约/流程"时，方可只刷新 `commit` 字段。
    - 任意提交触及 §7 条件，必须对应章节同步更新；commit message 信息不足时进一步看 `git log -p <doc_sha>..<remote_sha> --stat` 或具体文件 diff。
    - **禁止仅凭 sha 不匹配就只刷 commit 字段**。
