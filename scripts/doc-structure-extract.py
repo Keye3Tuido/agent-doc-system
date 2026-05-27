@@ -241,9 +241,14 @@ def extract_python_structure(source_code, file_path):
             module_start = None
             imports = []
 
-            # 提取模块名（第一个dotted_name）
+            # 提取模块名（第一个dotted_name或relative_import）
             for child in node.children:
                 if child.type == 'dotted_name':
+                    module = source_bytes[child.start_byte:child.end_byte].decode('utf8')
+                    module_start = child.start_byte
+                    break
+                elif child.type == 'relative_import':
+                    # 相对导入，如 from . import x
                     module = source_bytes[child.start_byte:child.end_byte].decode('utf8')
                     module_start = child.start_byte
                     break
@@ -257,6 +262,9 @@ def extract_python_structure(source_code, file_path):
                 elif child.type == 'dotted_name' and child.start_byte != module_start:
                     # 简单导入（非aliased），排除模块名本身
                     imports.append(source_bytes[child.start_byte:child.end_byte].decode('utf8'))
+                elif child.type == 'wildcard_import':
+                    # 通配符导入
+                    imports.append('*')
 
             if module:
                 key = (module, tuple(sorted(imports)))
@@ -637,6 +645,17 @@ def extract_go_structure(source_code, file_path):
                     key = (name, 'function')
                     if key not in seen_exports:
                         exports.append({'n': name, 't': 'function', 'path': file_path})
+                        seen_exports.add(key)
+
+        # 提取导出的方法（首字母大写）
+        elif node.type == 'method_declaration':
+            name_node = node.child_by_field_name('name')
+            if name_node:
+                name = source_bytes[name_node.start_byte:name_node.end_byte].decode('utf8')
+                if name and name[0].isupper():
+                    key = (name, 'method')
+                    if key not in seen_exports:
+                        exports.append({'n': name, 't': 'method', 'path': file_path})
                         seen_exports.add(key)
 
         # 提取导出的类型（struct, interface）
