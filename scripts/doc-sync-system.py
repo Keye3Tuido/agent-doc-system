@@ -161,14 +161,19 @@ def apply_changes(changes):
         shutil.copy2(sp, dp)
 
 
+def _format_path(target, rel):
+    """Render path entry: single-file target (rel is empty) → just target name; else target/rel."""
+    return target if not rel else f"{target}/{rel}"
+
+
 def print_summary(label, added, replaced, unchanged):
     print(f"\n=== {label} ===")
     print(f"ADDED:     {len(added)}")
     for t, rel, _, _ in sorted(added):
-        print(f"  + {t}/{rel}")
+        print(f"  + {_format_path(t, rel)}")
     print(f"REPLACED:  {len(replaced)}")
     for t, rel, _, _ in sorted(replaced):
-        print(f"  ~ {t}/{rel}")
+        print(f"  ~ {_format_path(t, rel)}")
     print(f"UNCHANGED: {len(unchanged)}")
 
 
