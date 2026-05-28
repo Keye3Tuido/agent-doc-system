@@ -26,7 +26,10 @@ description: "Check, organize, and archive the project documentation library. Ru
      - 更新 `schema_version` 字段到手册当前版本
      - 对照手册§9的schema定义，补充**所有**新增字段（必填+可选）
      - 对照 `~/.agent-docs/templates/` 中的模板文件，确保文档结构符合新模板要求
-     - 对于 schema v3+，必须提取并填充 `structure` 字段（调用 `doc-structure-extract.py`）
+     - 对于 schema v3+，必须提取并填充 `structure` 字段：
+       ```
+       python3 ~/.agent-docs/scripts/doc-structure-import.py <doc_path> <module_path> <project_root>
+       ```
    - 若文档缺少 `schema_version` 字段，添加为手册当前版本并按上述流程补全
 6. 对 `ARCHIVED_BUT_ACTIVE` 项：提议去掉 `archived` / `archived_at` / `archived_reason` 字段，刷新 `commit`，并在 `_index.md` 中从归档区移回活跃区。
 7. 把所有问题聚合到一张"将要执行的改动清单"，按以下分类：
