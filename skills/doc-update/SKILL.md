@@ -58,14 +58,13 @@ description: "Update existing documentation files for one or all submodules in t
      - 仅补充架构 / 职责边界 / 关键流程 / 接口 / 数据契约层面的信息；**不写实现细节、不写行号、不写具体常数**（参见 §6）。
      - 不引入新章节，仅扩写已有章节。
      - 粒度差距不显著（文档已抓住要点）→ 跳过该目标，不出 diff。
-   - **structure 字段提取**（stale 目标与粒度候选均执行）：
-     - 调用脚本提取结构化关系数据：
+   - **structure 字段提取**（stale 目标与粒度候选均执行；文档缺少 `structure` 字段时**必须**执行）：
+     - 调用导入脚本，自动提取并写入文档：
        ```
-       python3 ~/.agent-docs/scripts/doc-structure-extract.py <module_path> <project_root>
+       python3 ~/.agent-docs/scripts/doc-structure-import.py <doc_path> <module_path> <project_root>
        ```
-     - 脚本输出JSON格式的structure数据（deps/exports/inner）。
-     - 解析JSON并更新 yaml frontmatter 的 `structure` 字段。
-     - 若当前文档已有 `structure` 字段，对比现状后增量更新；若无则新建。
+     - 脚本内部调用 `doc-structure-extract.py`，将 deps/exports/inner 写入文档 YAML frontmatter 的 `structure` 字段，覆盖已有值。
+     - 脚本输出 `OK: <doc_path>` 表示成功；`ERROR: ...` 表示失败（需人工介入）。
 6. 若该文档还是首次落地骨架（章节为空或仅占位），按当前掌握的信息补充对应章节。
 7. 同步刷新元信息中的 `commit` 字段（子模块文档；粒度候选不刷 commit，因为代码未变）。
 8. 新建文档时使用 `python3 ~/.agent-docs/scripts/doc-scaffold.py <module_path> <project_root>` 生成骨架。

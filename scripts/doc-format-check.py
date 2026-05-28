@@ -129,6 +129,11 @@ def main():
                 if not valid and not archived_reason.startswith("renamed-to-") and not archived_reason.startswith("merged-into-"):
                     all_issues.append(f"{fname}: INVALID_ARCHIVED_REASON({archived_reason})")
 
+        # structure field check (schema v3+)
+        if str(sv) == CURRENT_SCHEMA_VERSION and not is_archived:
+            if "structure" not in meta:
+                all_issues.append(f"{fname}: MISSING_STRUCTURE")
+
         # Four-tuple uniqueness (only among active docs)
         if not is_archived:
             key = (
