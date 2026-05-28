@@ -19,6 +19,23 @@ description: "Check, organize, and archive the project documentation library. Ru
    - 检查 `structure.deps` 中引用的模块路径是否存在于当前项目（主仓库路径或 `.gitmodules` 中的子模块路径）。
    - 不存在的依赖标记为警告（不阻塞，因为可能是外部库或已移除的模块）。
    - 检查 `structure.exports` 和 `structure.inner` 的基本格式完整性（必填字段是否存在）。
+
+4.5 **structure 三类 advisory（不阻断，仅汇总）**：
+
+   a. **章节不一致**：列出 "structure 与文档章节不一致" 候选——`structure.exports` 中有但 "## 接口" 章节未提及的符号，或反之，作为人工核对清单。
+
+   b. **structure 新鲜度（兑现 §7 强不变量）**：
+      - 缓存路径：`<project>/.agent-docs/.cache/structure-fp.json`，结构 `{ "<doc_path>": { "fp": "<sha256>", "doc_mtime": <epoch>, "ts": <epoch> } }`。
+      - 对每份子模块文档：
+        - 计算当前 `structure` 字段的稳定 hash（按字段排序后 sha256）作为 `current_fp`。
+        - 读 `doc_mtime = os.path.getmtime(doc_path)`。
+        - 若缓存无该文档记录 → 写入基线，不报警。
+        - 若缓存中 `fp == current_fp` 但 `doc_mtime > cache.doc_mtime` → 警告 `> [doc-doctor] 正文已改但 structure 未刷，请跑 /doc-update <module> 重提`。
+        - 若 `fp != current_fp` → 更新缓存，不报警（说明 import 已跑过）。
+
+   c. **structure 空值堆积**：模块代码非空（`find_source_files` 返回 ≥ 1）但 `structure.deps + exports + inner` 三项总条目 < 3 → 警告 `> [doc-doctor] <doc> structure 几乎为空，可能脚本提取失败或语言不支持`。
+
+   d. **占位章节统计**：扫每份文档统计含 `_待生成_` 的章节数量，超过 5 章 → 提醒用户用 `/doc-update` 充实。
 5. **Schema版本检查与升级**：
    - 检查每份文档 yaml frontmatter 中的 `schema_version` 字段。
    - 对比全局手册 `~/.agent-docs/manual/doc-system.md` 中的当前 schema 版本。

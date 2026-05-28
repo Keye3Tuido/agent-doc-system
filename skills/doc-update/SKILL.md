@@ -94,3 +94,8 @@ description: "Update existing documentation files for one or all submodules in t
 - 粒度补充须以 agent 本次对话中**实际读过**的源码为依据，禁止凭推测扩写文档。
 - 粒度补充必须遵守 §6 全部硬约束；不引入新章节，仅扩写已有章节。
 - 粒度候选与 stale 是两条独立分支：stale 目标走 SHA 漂移流程并刷 commit；粒度候选不刷 commit，因为代码未变。同一目标若两条都触发，分别处理后合并到同一份 diff。
+- **structure 同步刷新（强不变量，对应手册 §7）**：本流程对任一文档的正文做出变动时，**必须**重跑 `python3 ~/.agent-docs/scripts/doc-structure-import.py <doc_path> <module_path> <project_root>` 覆盖 structure 字段。三种情形均适用：(a) sha 漂移内容刷新；(b) 粒度补充扩写；(c) schema 升级补字段。**正文每改一次 → structure 必须同步重提**；漏刷 = doctor 视为不一致警告。
+- **触发条件扩展（对应手册 §7）**：
+  - 协作关系变化（`cross_module_contracts` 候选清单变更）→ 触发对应章节更新
+  - 模块边界数据流变化（`data_flow_anchors` 变更）→ 触发主模块 `## 跨模块数据流`
+  - 子模块 `## 典型修改场景` **永不自动触发**——纯经验沉淀，仅用户主动要求时维护

@@ -98,36 +98,40 @@ def detect_language(file_path):
     return lang_map.get(ext)
 
 
-def find_source_files(module_path, max_files=50, max_file_size=1024*1024):
-    """查找模块中的源码文件（限制数量避免过载）"""
+def find_source_files(module_path, max_files=200, max_file_size=1024*1024):
+    """查找模块中的源码文件（限制数量避免过载）。
+
+    修 P1-7：先全量收集 → 过滤 → 末尾截断；不再按 pattern 提前 break，
+    避免前面的语言把 max_files 配额抢光导致后面的语言一个不扫。
+    """
     patterns = ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.py',
                 '**/*.go', '**/*.java', '**/*.rs', '**/*.cpp', '**/*.cc',
                 '**/*.cxx', '**/*.c', '**/*.h', '**/*.hpp']
 
-    files = []
+    all_files = []
     for pattern in patterns:
-        found = glob.glob(os.path.join(module_path, pattern), recursive=True)
-        files.extend(found[:max_files - len(files)])
-        if len(files) >= max_files:
-            break
+        all_files.extend(glob.glob(os.path.join(module_path, pattern), recursive=True))
 
     # 排除常见的非源码目录（使用路径组件匹配）
     exclude_dirs = {'node_modules', 'dist', 'build', '__pycache__', '.git', 'vendor', 'target', 'out'}
     filtered = []
-    for f in files:
-        # 跳过符号链接
+    for f in all_files:
         if os.path.islink(f):
             continue
-        # 跳过不存在的文件
         if not os.path.isfile(f):
             continue
-        # 跳过过大的文件
         if os.path.getsize(f) > max_file_size:
             continue
-        # 检查路径组件是否包含排除目录
         if any(ex in Path(f).parts for ex in exclude_dirs):
             continue
         filtered.append(f)
+
+    # 优先头文件（C/C++ 头文件含更多 export 信息），然后 TS/.h 之外按字典序
+    def sort_key(p):
+        ext = Path(p).suffix.lower()
+        priority = 0 if ext in ('.h', '.hpp', '.hxx', '.hh') else 1
+        return (priority, p)
+    filtered.sort(key=sort_key)
 
     return filtered[:max_files]
 
@@ -209,7 +213,10 @@ def extract_typescript_structure(source_code, file_path):
 
 
 def extract_python_structure(source_code, file_path):
-    """使用tree-sitter提取Python结构"""
+    """使用tree-sitter提取Python结构
+
+    exports: 优先取 __all__ 中的符号；无 __all__ 时取顶层非下划线符号。
+    """
     if 'python' not in LANGUAGES:
         return [], [], []
     parser = Parser(LANGUAGES['python'])
@@ -222,6 +229,27 @@ def extract_python_structure(source_code, file_path):
     inner = []
     seen_deps = set()
     seen_exports = set()
+
+    # 第一遍：扫 __all__
+    all_whitelist = None
+    for child in root.children:
+        if child.type == 'expression_statement':
+            for sub in child.children:
+                if sub.type == 'assignment':
+                    left = sub.child_by_field_name('left')
+                    right = sub.child_by_field_name('right')
+                    if left and right and source_bytes[left.start_byte:left.end_byte].decode('utf8') == '__all__':
+                        all_whitelist = set()
+                        # right 是 list 字面量
+                        for c in right.children:
+                            if c.type == 'string':
+                                s = source_bytes[c.start_byte:c.end_byte].decode('utf8').strip('"\'')
+                                all_whitelist.add(s)
+
+    def is_exported(name):
+        if all_whitelist is not None:
+            return name in all_whitelist
+        return not name.startswith('_')
 
     def visit_node(node):
         # 提取import语句
@@ -277,7 +305,7 @@ def extract_python_structure(source_code, file_path):
             name_node = node.child_by_field_name('name')
             if name_node:
                 name = source_bytes[name_node.start_byte:name_node.end_byte].decode('utf8')
-                if not name.startswith('_'):  # 排除私有类
+                if is_exported(name):  # __all__ 优先；无则顶层公开符号
                     key = (name, 'class')
                     if key not in seen_exports:
                         exports.append({'n': name, 't': 'class', 'path': file_path})
@@ -301,7 +329,7 @@ def extract_python_structure(source_code, file_path):
             name_node = node.child_by_field_name('name')
             if name_node:
                 name = source_bytes[name_node.start_byte:name_node.end_byte].decode('utf8')
-                if not name.startswith('_'):  # 排除私有函数
+                if is_exported(name):
                     key = (name, 'function')
                     if key not in seen_exports:
                         exports.append({'n': name, 't': 'function', 'path': file_path})
@@ -315,9 +343,15 @@ def extract_python_structure(source_code, file_path):
 
 
 def extract_cpp_structure(source_code, file_path):
-    """使用tree-sitter提取C/C++结构"""
+    """使用tree-sitter提取C/C++结构
+
+    exports: 仅在头文件（.h/.hpp/.hxx/.hh）中提取，避免捕获实现文件中的内部函数。
+    deps: 所有文件均提取。
+    inner: 仅在头文件中提取（声明位置）。
+    """
     if 'cpp' not in LANGUAGES:
         return [], [], []
+    is_header = Path(file_path).suffix.lower() in ('.h', '.hpp', '.hxx', '.hh')
     parser = Parser(LANGUAGES['cpp'])
     source_bytes = bytes(source_code, 'utf8')
     tree = parser.parse(source_bytes)
@@ -330,7 +364,7 @@ def extract_cpp_structure(source_code, file_path):
     seen_exports = set()
 
     def visit_node(node):
-        # 提取#include语句
+        # 提取#include语句（所有文件）
         if node.type == 'preproc_include':
             for child in node.children:
                 if child.type in ['string_literal', 'system_lib_string']:
@@ -339,11 +373,10 @@ def extract_cpp_structure(source_code, file_path):
                         deps.append({'m': path, 'use': [], 'type': 'include'})
                         seen_deps.add(path)
 
-        # 提取函数定义
-        elif node.type == 'function_definition':
+        # 提取函数定义（仅头文件中的声明视为 export；实现文件跳过）
+        elif node.type == 'function_definition' and is_header:
             declarator = node.child_by_field_name('declarator')
             if declarator:
-                # 查找函数名
                 name = None
                 if declarator.type == 'function_declarator':
                     for child in declarator.children:
@@ -359,8 +392,8 @@ def extract_cpp_structure(source_code, file_path):
                         exports.append({'n': name, 't': 'function', 'path': file_path})
                         seen_exports.add(key)
 
-        # 提取类定义
-        elif node.type == 'class_specifier':
+        # 提取类定义（仅头文件中的类声明）
+        elif node.type == 'class_specifier' and is_header:
             name_node = node.child_by_field_name('name')
             if name_node:
                 name = source_bytes[name_node.start_byte:name_node.end_byte].decode('utf8')
@@ -369,7 +402,6 @@ def extract_cpp_structure(source_code, file_path):
                     exports.append({'n': name, 't': 'class', 'path': file_path})
                     seen_exports.add(key)
 
-                # 提取类的public方法
                 methods = []
                 body = node.child_by_field_name('body')
                 if body:
@@ -392,8 +424,8 @@ def extract_cpp_structure(source_code, file_path):
                 if methods:
                     inner.append({'n': name, 't': 'class', 'has': methods[:10]})
 
-        # 提取struct定义
-        elif node.type == 'struct_specifier':
+        # 提取struct定义（仅头文件）
+        elif node.type == 'struct_specifier' and is_header:
             name_node = node.child_by_field_name('name')
             if name_node:
                 name = source_bytes[name_node.start_byte:name_node.end_byte].decode('utf8')
@@ -700,7 +732,7 @@ def extract_go_structure(source_code, file_path):
     return deps, exports, inner
 
 
-def extract_structure_treesitter(module_path):
+def extract_structure_treesitter(module_path, max_files=200, max_file_size=1024*1024):
     """使用tree-sitter提取结构"""
     structure = {
         'deps': [],
@@ -708,7 +740,24 @@ def extract_structure_treesitter(module_path):
         'inner': []
     }
 
-    files = find_source_files(module_path)
+    # 计算总匹配数（用于截断警告）
+    total_matched = 0
+    patterns_for_count = ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.py',
+                          '**/*.go', '**/*.java', '**/*.rs', '**/*.cpp', '**/*.cc',
+                          '**/*.cxx', '**/*.c', '**/*.h', '**/*.hpp']
+    exclude_dirs = {'node_modules', 'dist', 'build', '__pycache__', '.git', 'vendor', 'target', 'out'}
+    for pat in patterns_for_count:
+        for f in glob.glob(os.path.join(module_path, pat), recursive=True):
+            if os.path.islink(f) or not os.path.isfile(f):
+                continue
+            if any(ex in Path(f).parts for ex in exclude_dirs):
+                continue
+            total_matched += 1
+
+    files = find_source_files(module_path, max_files=max_files, max_file_size=max_file_size)
+    if total_matched > len(files):
+        print(f"WARNING: module truncated, scanned {len(files)}/{total_matched} files",
+              file=sys.stderr)
     all_deps = []
     all_exports = []
     all_inner = []
@@ -788,23 +837,331 @@ def extract_structure_treesitter(module_path):
     return structure
 
 
+# ============================================================
+# 后处理层：模块映射、跨模块过滤、role 判定、use 频次、模式识别、循环依赖
+# ============================================================
+
+# 已知公共包注册表前缀（命中视为 utility）
+PUBLIC_PACKAGE_PREFIXES = (
+    "react", "react-", "@react", "@types/", "@angular/", "@vue/",
+    "lodash", "axios", "express", "vue", "next", "vite",
+    "numpy", "pandas", "scipy", "torch", "tensorflow", "django", "flask", "requests",
+    "serde", "tokio", "rayon", "anyhow", "thiserror", "clap",
+    "google.", "javax.", "org.springframework", "com.google", "junit",
+    "github.com/", "golang.org/", "google.golang.org/", "gopkg.in/",
+    "boost/", "Qt", "qt/",
+)
+
+# 项目根 framework / engine 约定目录
+FRAMEWORK_DIR_HINTS = ("engine", "framework", "core", "runtime", "platform")
+RESOURCE_DIR_HINTS = ("Resources", "resources", "assets", "config", "configs", "Config")
+
+
+def resolve_submodule_paths(project_root, mechanism="auto"):
+    """收集项目子模块路径清单。返回相对项目根的路径 set。"""
+    paths = set()
+
+    def parse_gitmodules():
+        f = os.path.join(project_root, ".gitmodules")
+        if not os.path.isfile(f):
+            return
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line.startswith("path"):
+                        eq = line.find("=")
+                        if eq > 0:
+                            paths.add(line[eq + 1:].strip())
+        except Exception:
+            pass
+
+    def parse_package_json():
+        f = os.path.join(project_root, "package.json")
+        if not os.path.isfile(f):
+            return
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            ws = data.get("workspaces")
+            patterns = []
+            if isinstance(ws, list):
+                patterns = ws
+            elif isinstance(ws, dict):
+                patterns = ws.get("packages", []) or []
+            for pat in patterns:
+                # 简化：仅展开通配 packages/* 这类
+                base = pat.replace("/*", "")
+                base_path = os.path.join(project_root, base)
+                if os.path.isdir(base_path) and "*" in pat:
+                    for sub in os.listdir(base_path):
+                        sub_full = os.path.join(base_path, sub)
+                        if os.path.isdir(sub_full):
+                            paths.add(os.path.relpath(sub_full, project_root))
+                elif os.path.isdir(base_path):
+                    paths.add(base)
+        except Exception:
+            pass
+
+    def parse_cargo_toml():
+        f = os.path.join(project_root, "Cargo.toml")
+        if not os.path.isfile(f):
+            return
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                in_ws = False
+                for line in fh:
+                    s = line.strip()
+                    if s.startswith("[workspace]"):
+                        in_ws = True
+                        continue
+                    if s.startswith("["):
+                        in_ws = False
+                        continue
+                    if in_ws and s.startswith("members"):
+                        # members = ["a", "b"]
+                        m = re.search(r"\[(.*?)\]", s)
+                        if m:
+                            for item in m.group(1).split(","):
+                                v = item.strip().strip('"').strip("'")
+                                if v:
+                                    paths.add(v)
+        except Exception:
+            pass
+
+    if mechanism in ("auto", "git-submodule"):
+        parse_gitmodules()
+    if mechanism in ("auto", "monorepo-workspace"):
+        parse_package_json()
+    if mechanism in ("auto", "cargo-workspace"):
+        parse_cargo_toml()
+
+    return paths
+
+
+def is_external_package(module_str):
+    """判断字符串是否为外部包（npm / pypi / 类似命名）。"""
+    if not module_str:
+        return False
+    # 相对路径、绝对路径、./../ 起始 → 非外部
+    if module_str.startswith((".", "/", "./", "../")):
+        return False
+    # 已知公共包前缀
+    for pre in PUBLIC_PACKAGE_PREFIXES:
+        if module_str.startswith(pre):
+            return True
+    return False
+
+
+def map_dep_to_module(dep_m, current_module_rel, project_root, submodule_paths):
+    """把 deps 项的 m 字段映射为目标模块标识。
+
+    返回 (target_module, role)：
+      - target_module: 跨模块时为目标子模块路径或外部包名；同模块内部 → None
+      - role: framework / utility / sibling / resource / unknown
+
+    兜底语义（修 P0-1/P0-4）：未匹配任何已知模式时，**保留 dep 字面量为 unknown**
+    而非返回 None 丢弃；让下游（doctor / 用户）裁决。仅在能明确判定为模块内部
+    引用时才返回 None。
+    """
+    if not dep_m:
+        return None, "unknown"
+
+    # 外部包 → utility
+    if is_external_package(dep_m):
+        return dep_m, "utility"
+
+    # 相对路径基于当前模块
+    if dep_m.startswith(("./", "../")):
+        abs_target = os.path.normpath(os.path.join(project_root, current_module_rel, dep_m))
+        rel = os.path.relpath(abs_target, project_root)
+        # 解析后落在自身模块内 → 模块内部引用
+        if rel == current_module_rel or rel.startswith(current_module_rel + os.sep):
+            return None, "unknown"
+        # 解析后落在某子模块内
+        for sub in submodule_paths:
+            if rel == sub or rel.startswith(sub + os.sep):
+                return sub, "sibling"
+        # 解析后落在 framework / resource hint
+        first_seg = rel.split(os.sep)[0] if rel else ""
+        if first_seg in FRAMEWORK_DIR_HINTS:
+            return first_seg, "framework"
+        if first_seg in RESOURCE_DIR_HINTS:
+            return first_seg, "resource"
+        # 兜底：保留为 unknown 字面量
+        return rel, "unknown"
+
+    if dep_m.startswith("/"):
+        # 绝对路径，几乎不该出现；保留字面量
+        return dep_m, "unknown"
+
+    # 非路径形式（裸名 / 包名 / include 字面量）
+    # 优先比对 submodule_paths：dep_m 是否前缀命中任何子模块路径
+    for sub in submodule_paths:
+        if dep_m == sub or dep_m.startswith(sub + "/") or dep_m.startswith(sub + os.sep):
+            if sub == current_module_rel:
+                return None, "unknown"  # 自指
+            return sub, "sibling"
+
+    # framework / resource hint 命中第一段
+    first_seg = dep_m.split("/")[0]
+    if first_seg in FRAMEWORK_DIR_HINTS:
+        return first_seg, "framework"
+    if first_seg in RESOURCE_DIR_HINTS:
+        return first_seg, "resource"
+
+    # 兜底：保留字面量为 unknown（修 P0-1：不再丢弃）
+    return dep_m, "unknown"
+
+
+def postprocess_structure(raw, rel_module, project_root, submodule_paths, candidates_out=None):
+    """对原始 raw 结构做语义级 enrichment。"""
+    enriched = {
+        "deps": [],
+        "exports": [],
+        "inner": [],
+        "cross_module_contracts": [],
+        "data_flow_anchors": [],
+    }
+
+    # ---- deps：模块级归并 + 跨模块过滤 + role + granularity + use 聚合 ----
+    # 聚合表：target_module → {role, use_freq: {sym: count}}
+    #
+    # 注（v1 限制 / TODO）：当前 use 频次 = "符号在 raw deps 中作为 import 出现的次数"，
+    # 而非 TODO §1.1 期望的"符号在源码非声明位置的引用次数"。原因是各语言 visit_node
+    # 当前只在 import 节点收集，未追加 identifier 引用扫描。
+    # 后续 v2 可在每个语言提取器加 identifier-frequency pass，结果通过 raw 输出
+    # 同名 sym 多条 dep 项让此聚合自然反映真实引用频次。
+    agg = {}
+    for d in raw.get("deps", []):
+        target, role = map_dep_to_module(d.get("m", ""), rel_module, project_root, submodule_paths)
+        if target is None:
+            continue  # 模块内部引用丢弃
+        bucket = agg.setdefault(target, {"role": role, "use_freq": {}})
+        for sym in d.get("use", []) or []:
+            bucket["use_freq"][sym] = bucket["use_freq"].get(sym, 0) + 1
+
+    for target, info in agg.items():
+        # top-5 频次符号
+        top = sorted(info["use_freq"].items(), key=lambda kv: -kv[1])[:5]
+        enriched["deps"].append({
+            "m": target,
+            "use": [k for k, _ in top],
+            "type": "import",
+            "role": info["role"],
+            "granularity": "module",
+        })
+
+    # ---- exports：默认 vis=public（所有现有提取器已过滤了非公开） ----
+    for e in raw.get("exports", []):
+        item = dict(e)
+        item.setdefault("vis", "public")
+        enriched["exports"].append(item)
+
+    # ---- inner：识别 pattern (singleton / observer)；base 字段保留空对象 ----
+    for n in raw.get("inner", []):
+        item = dict(n)
+        has = set(item.get("has") or [])
+        # singleton：has 含 getInstance / instance / getSingleton 或类名后缀 Singleton
+        is_singleton = any(m in has for m in ("getInstance", "instance", "getSingleton")) \
+            or item.get("n", "").endswith("Singleton")
+        # observer：has 含 addObserver / subscribe / on / emit / publish 任三件
+        observer_markers = sum(1 for m in ("addObserver", "subscribe", "on", "emit", "publish",
+                                            "addListener", "notify") if m in has)
+        is_observer = observer_markers >= 2
+        if is_singleton:
+            item["pattern"] = "singleton"
+        elif is_observer:
+            item["pattern"] = "observer"
+        # base 字段：保留缺省（提取器未填）；下游手动补
+        enriched["inner"].append(item)
+
+    # ---- cross_module_contracts：高置信度自动识别 ----
+    contract_candidates = []
+    for n in raw.get("inner", []):
+        cls_name = n.get("n", "")
+        # 命名启发：*Delegate / *Listener / *Observer
+        if cls_name.endswith(("Delegate", "Listener", "Observer", "Callback")):
+            contract_candidates.append({
+                "with": "(unknown)",
+                "protocol": "delegate" if cls_name.endswith("Delegate") else "callback",
+                "interface": cls_name,
+                "direction": "outbound",
+                "note": f"declared as {cls_name}",
+                "confidence": "medium",
+                "_source_path": n.get("path", ""),
+            })
+    # 仅高置信度（命名 + 配对存在 implements）写入 enriched
+    # 当前 raw 不带 implements 信息 → 全部进候选清单，不入正式字段
+    # （后续 schema base 加 implements 后可升级）
+
+    # ---- data_flow_anchors：保留为候选（需要跨模块视角，单模块视角无法判定） ----
+    flow_candidates = []  # 暂留空；由 main 模块视角脚本调用时填充
+
+    if candidates_out:
+        try:
+            with open(candidates_out, "w", encoding="utf-8") as fh:
+                json.dump({
+                    "cross_module_contracts": contract_candidates,
+                    "data_flow_anchors": flow_candidates,
+                }, fh, indent=2, ensure_ascii=False)
+        except Exception as ex:
+            print(f"WARNING: failed to write candidates: {ex}", file=sys.stderr)
+
+    # ---- 循环依赖检测 ----
+    # 注：单模块调用看不到双向边，此处仅基于本模块 → 其他模块的单向 deps，
+    # 真正循环检测须在主模块视角下聚合多个 extract 结果。
+    # 这里仅对本批 deps 做 trivial 自循环检测（target == current_module）。
+    for dep in enriched["deps"]:
+        if dep["m"] == rel_module:
+            print(f"WARNING: self-loop in deps for module {rel_module}", file=sys.stderr)
+
+    return enriched
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: doc-structure-extract.py <module_path> [project_root]", file=sys.stderr)
-        sys.exit(1)
+    import argparse
+    p = argparse.ArgumentParser(description="Extract structure data from source modules")
+    p.add_argument("module_path", help="模块路径（相对 project_root 或绝对路径）")
+    p.add_argument("project_root", nargs="?", default=None, help="项目根目录")
+    p.add_argument("--max-files", type=int, default=200, help="最多扫描文件数（默认 200）")
+    p.add_argument("--max-file-size", type=int, default=1024 * 1024, help="单文件最大字节（默认 1 MiB）")
+    p.add_argument("--resolve-modules", default="auto",
+                   choices=["auto", "git-submodule", "monorepo-workspace", "cargo-workspace", "none"],
+                   help="子模块路径解析机制（默认 auto 嗅探）")
+    p.add_argument("--candidates", default=None,
+                   help="将 cross_module_contracts / data_flow_anchors 候选清单 dump 到指定 JSON 文件")
+    args = p.parse_args()
 
-    module_path = sys.argv[1]
-    project_root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
-
-    module_path = os.path.abspath(os.path.join(project_root, module_path))
+    project_root = os.path.abspath(args.project_root or os.getcwd())
+    module_path = args.module_path
+    if not os.path.isabs(module_path):
+        module_path = os.path.join(project_root, module_path)
+    module_path = os.path.abspath(module_path)
 
     if not os.path.isdir(module_path):
         print(f"ERROR: {module_path} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    structure = extract_structure_treesitter(module_path)
+    raw = extract_structure_treesitter(
+        module_path,
+        max_files=args.max_files,
+        max_file_size=args.max_file_size,
+    )
 
-    print(json.dumps(structure, indent=2, ensure_ascii=False))
+    # 后处理 enrichment
+    rel_module = os.path.relpath(module_path, project_root)
+    submodule_paths = resolve_submodule_paths(project_root, args.resolve_modules)
+
+    enriched = postprocess_structure(
+        raw,
+        rel_module=rel_module,
+        project_root=project_root,
+        submodule_paths=submodule_paths,
+        candidates_out=args.candidates,
+    )
+
+    print(json.dumps(enriched, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
