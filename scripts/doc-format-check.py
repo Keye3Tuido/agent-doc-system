@@ -21,6 +21,7 @@ Note: 由于不依赖 PyYAML，本脚本采用启发式 parser 解析 yaml front
 import os
 import re
 import sys
+import yaml
 
 
 REQUIRED_FIELDS = ["schema_version", "agent_load", "repo", "origin_host", "owner", "name", "branch", "commit"]
@@ -29,7 +30,18 @@ VALID_ARCHIVED_REASONS = [
     "removed-from-gitmodules",
     "imported-from-other-project",
 ]
-CURRENT_SCHEMA_VERSION = "3"
+CURRENT_SCHEMA_VERSION = "4"
+
+# schema v4 必填的顶层块
+V4_REQUIRED_TOP_LEVEL_BLOCKS = [
+    "module_classification",
+    "key_abstractions",
+    "dependency_graph",
+    "communication_pattern",
+    "data_flow_summary",
+    "interface_exposure",
+    "extensibility_points",
+]
 
 # structure 字段允许的取值
 VALID_DEPS_ROLES = {"framework", "utility", "sibling", "resource", "unknown"}
@@ -351,7 +363,7 @@ def main():
                 if not valid and not archived_reason.startswith("renamed-to-") and not archived_reason.startswith("merged-into-"):
                     all_issues.append(f"{fname}: INVALID_ARCHIVED_REASON({archived_reason})")
 
-        # structure field check (schema v3+, only active docs)
+        # structure field check (schema v4+, only active docs)
         if str(sv) == CURRENT_SCHEMA_VERSION and not is_archived:
             raw = extract_meta_raw(fpath)
             struct = parse_structure_block(raw)
@@ -359,6 +371,20 @@ def main():
                 all_issues.append(f"{fname}: MISSING_STRUCTURE")
             else:
                 validate_structure(struct, fname, all_issues)
+
+        # v4 required top-level blocks check (schema v4+, only active docs)
+        if str(sv) == CURRENT_SCHEMA_VERSION and not is_archived:
+
+            raw = extract_meta_raw(fpath)
+            if raw:
+                try:
+                    full_meta = yaml.safe_load(raw)
+                    if full_meta:
+                        for block in V4_REQUIRED_TOP_LEVEL_BLOCKS:
+                            if block not in full_meta or full_meta[block] is None:
+                                all_issues.append(f"{fname}: MISSING_V4_BLOCK({block})")
+                except:
+                    pass
 
         # Four-tuple uniqueness (only among active docs)
         if not is_archived:

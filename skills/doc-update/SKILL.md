@@ -43,7 +43,7 @@ description: "Update existing documentation files for one or all submodules in t
      - 更新`schema_version`字段到手册当前版本
      - 对照手册§9的schema定义，补充**所有**新增字段（必填+可选）
      - 对照`~/.agent-docs/templates/`中的模板文件，确保文档结构符合新模板要求
-     - 对于schema v3+，必须提取并填充`structure`字段（deps/exports/inner）
+     - 对于schema v4+，必须提取并填充`structure`字段（deps/exports/inner）
    - 若文档缺少`schema_version`字段，添加为手册当前版本并按上述流程补全
 3. 若文档状态为 `ARCHIVED_BUT_ACTIVE`：去掉 `archived` / `archived_at` / `archived_reason` 字段，将其从 `_index.md` 归档区移回活跃区。
 4. **STALE 内容判定**（按手册 §4 第 6 条；仅 stale 目标走此步）：在子模块目录内执行 `git log --oneline <doc_sha>..<remote_sha>`，对照 §7 触发条件逐条审视：

@@ -18,7 +18,7 @@ import subprocess
 import sys
 
 
-# 允许的 structure 一级键白名单（schema v3 扩展）
+# 允许的 structure 一级键白名单（schema v4 扩展）
 ALLOWED_STRUCTURE_KEYS = {
     "deps",
     "exports",
