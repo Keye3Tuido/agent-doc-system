@@ -1,45 +1,10 @@
 ---
-schema_version: 4
+schema_version: 5
 agent_load: always
 structure:
   deps: []
   exports: []
-  inner: []
   cross_module_contracts: []
-  data_flow_anchors: []
-module_classification:
-  language: ""
-  framework: ""
-  role: ""
-  layer: ""
-  lifecycle_stage: ""
-key_abstractions:
-  classes: []
-  interfaces: []
-  functions: []
-  data_structures: []
-dependency_graph:
-  direct_deps: []
-  provides_to: []
-  optional_deps: []
-  dev_deps: []
-communication_pattern:
-  interaction_model: ""
-  protocols: []
-  events: []
-data_flow_summary:
-  inputs: []
-  outputs: []
-  state: []
-  side_effects: []
-interface_exposure:
-  public: []
-  internal: []
-  deprecated: []
-extensibility_points:
-  hooks: []
-  plugins: []
-  configuration: []
 ---
 
 # 主模块文档（待生成）
@@ -50,6 +15,9 @@ extensibility_points:
 _待生成_
 
 ## 职责边界
+_待生成_
+
+## 业务逻辑
 _待生成_
 
 ## 框架总览

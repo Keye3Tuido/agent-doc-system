@@ -10,7 +10,7 @@ Checks:
   - commit is 10-40 char hex
   - No duplicate (origin_host, owner, name, branch) four-tuples among active docs
   - Archived docs must have: archived_at, archived_reason, origin_path_in_main
-  - structure field schema (deps / exports / inner / cross_module_contracts / data_flow_anchors)
+  - structure field schema (deps / exports / cross_module_contracts)
 
 Output: one issue per line, or "ALL_PASS" if clean.
 
@@ -30,24 +30,12 @@ VALID_ARCHIVED_REASONS = [
     "removed-from-gitmodules",
     "imported-from-other-project",
 ]
-CURRENT_SCHEMA_VERSION = "4"
-
-# schema v4 必填的顶层块
-V4_REQUIRED_TOP_LEVEL_BLOCKS = [
-    "module_classification",
-    "key_abstractions",
-    "dependency_graph",
-    "communication_pattern",
-    "data_flow_summary",
-    "interface_exposure",
-    "extensibility_points",
-]
+CURRENT_SCHEMA_VERSION = "5"
 
 # structure 字段允许的取值
 VALID_DEPS_ROLES = {"framework", "utility", "sibling", "resource", "unknown"}
 VALID_DEPS_GRANULARITY = {"file", "module"}
 VALID_EXPORTS_VIS = {"public", "protected", "internal"}
-VALID_INNER_PATTERN_V1 = {"singleton", "observer"}  # v1 严格枚举；其他值警告但不拒绝
 VALID_CONTRACT_PROTOCOLS = {
     "delegate", "callback", "event", "message", "rpc", "inherit",
     "ecs", "di", "observer-bus", "state-machine",
@@ -103,7 +91,7 @@ def parse_structure_block(raw_yaml):
 
     极简解析器：识别 list-of-dict 模式，足以支撑校验。不构造完整 yaml。
 
-    修 P0-3：对 list-item 内的嵌套 dict（如 `inner[].base: { extends: [...] }`），
+    修 P0-3：对 list-item 内的嵌套 dict（如 `exports[].base: { extends: [...] }`），
     整段跳过，避免把嵌套 dict 的子键和子 list 元素污染到同级字段。
     本解析器不需要校验 `base` 内部，"宽松通过"由手册明确。
     """
@@ -260,17 +248,6 @@ def validate_structure(struct, fname, issues):
             if base is not None and not isinstance(base, str):
                 issues.append(f"{fname}: STRUCTURE_EXPORTS[{i}]_INVALID_BASE_TYPE")
 
-    inner = struct.get("inner", [])
-    if isinstance(inner, list):
-        for i, n in enumerate(inner):
-            if not isinstance(n, dict):
-                continue
-            pattern = n.get("pattern")
-            if pattern and pattern not in VALID_INNER_PATTERN_V1:
-                issues.append(f"{fname}: STRUCTURE_INNER[{i}]_UNKNOWN_PATTERN({pattern})  (warn-only)")
-            # base 应为 dict {extends, implements} 或缺省。极简 parser 不解析嵌套 dict，
-            # 这里宽松通过；嵌套结构由 import 脚本写入时保证形状。
-
     contracts = struct.get("cross_module_contracts", [])
     if isinstance(contracts, list):
         for i, c in enumerate(contracts):
@@ -285,18 +262,6 @@ def validate_structure(struct, fname, issues):
             direction = c.get("direction")
             if direction and direction not in VALID_CONTRACT_DIRECTIONS:
                 issues.append(f"{fname}: STRUCTURE_CONTRACTS[{i}]_INVALID_DIRECTION({direction})")
-
-    anchors = struct.get("data_flow_anchors", [])
-    if isinstance(anchors, list):
-        for i, a in enumerate(anchors):
-            if not isinstance(a, dict):
-                continue
-            name = a.get("name")
-            if not name or not isinstance(name, str):
-                issues.append(f"{fname}: STRUCTURE_ANCHORS[{i}]_MISSING_NAME")
-            holders = a.get("holders")
-            if not isinstance(holders, list) or len(holders) < 2:
-                issues.append(f"{fname}: STRUCTURE_ANCHORS[{i}]_HOLDERS_LT_2")
 
 
 def main():
@@ -372,19 +337,6 @@ def main():
             else:
                 validate_structure(struct, fname, all_issues)
 
-        # v4 required top-level blocks check (schema v4+, only active docs)
-        if str(sv) == CURRENT_SCHEMA_VERSION and not is_archived:
-
-            raw = extract_meta_raw(fpath)
-            if raw:
-                try:
-                    full_meta = yaml.safe_load(raw)
-                    if full_meta:
-                        for block in V4_REQUIRED_TOP_LEVEL_BLOCKS:
-                            if block not in full_meta or full_meta[block] is None:
-                                all_issues.append(f"{fname}: MISSING_V4_BLOCK({block})")
-                except:
-                    pass
 
         # Four-tuple uniqueness (only among active docs)
         if not is_archived:

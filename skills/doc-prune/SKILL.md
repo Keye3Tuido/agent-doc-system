@@ -17,12 +17,8 @@ description: "Permanently delete unused or orphaned documentation files in the p
    - `archived: true` 且元信息字段不全（缺 `archived_at` 或 `archived_reason`）→ 候选"残破归档文档"。
 3. 非归档的 `ORPHAN_DOC`（应归档但未标记）**只列不删**，提示用户先用 `/doc-doctor` 走归档流程。
 4. 将候选清单写入审阅文件：
-   - 先用 `fs_write` 把清单写到 `<project>/.agent-docs/.tmp/diff-staging.md`。
-   - 立即用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <project>/.agent-docs/.tmp/diff-staging.md` 修复编码（兜底 fs_write 的 GBK 漏写）。
-   - 再调用：
-     ```
-     python3 ~/.agent-docs/scripts/doc-diff-propose.py <project_root> --from <project>/.agent-docs/.tmp/diff-staging.md --title "doc-prune: N files to delete"
-     ```
+   - 直接用 `fs_write` 把清单写入 `<project>/.agent-docs/.tmp/pending-review.md`。
+   - 立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md` 修复编码。
 5. 告知用户：**"删除候选已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes 执行物理删除。"**
 6. **必须等用户回复 yes 之后**才动手。
 7. 执行删除。删除完成后同步更新 `_index.md` 的归档区。

@@ -117,7 +117,7 @@ def main():
 
     # 输出骨架
     output = f"""---
-schema_version: 4
+schema_version: 5
 agent_load: on-demand
 repo: "{origin_url}"
 origin_host: "{host}"
@@ -129,9 +129,7 @@ origin_path_in_main: "{module_path}"
 structure:
   deps: []
   exports: []
-  inner: []
   cross_module_contracts: []
-  data_flow_anchors: []
 ---
 
 # {name}
@@ -142,6 +140,15 @@ structure:
 ## 职责边界
 做什么：
 不做什么：
+
+## 业务逻辑
+本模块参与/主导的业务场景，及在各场景中的职责分工。
+
+### <场景A>
+- 入口：<哪个类/方法触发>
+- 本模块负责：<做什么>
+- 产出/下游：<输出给谁>
+- 涉及核心文件：<文件路径> — <职责>
 
 ## 架构
 _待生成_

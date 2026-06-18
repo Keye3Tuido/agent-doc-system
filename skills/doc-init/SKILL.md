@@ -17,8 +17,8 @@ description: "Initialize the documentation library when the current project has 
    - 创建空目录 `doc-library/modules/`，放一个 `.gitkeep`。
    - 解析项目主仓库 origin 并填入 `_index.md` 的 `project_config.repo_root_marker`。
 4. **必须等用户回复 yes 之后**才动手。
-5. 执行上述动作。每写完一个文件，立即用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 兜底（自动检测并修复 GBK / BOM / CRLF；这是因为 `fs_write` 在中文系统有把 UTF-8 误存为 GBK 的历史 bug）。
-6. 执行 §13 第一阶段：解析 `.gitmodules`，输出子模块清单（每条含路径 + origin URL + 当前 branch + 一句话定位草案 + `fileMatchPattern` 草案，含主仓库粘合点）。**不生成任何子模块 .md 文件**。
+5. 执行上述动作。每写完一个文件，立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（自动检测并修复 GBK / BOM / CRLF；这是因为 `fs_write` 在中文系统有把 UTF-8 误存为 GBK 的历史 bug）。
+6. 执行 §13 第一阶段：解析 `.gitmodules`，输出子模块清单（每条含路径 + origin URL + 当前 branch + 一句话定位草案）。**不生成任何子模块 .md 文件**。
 7. 等用户确认清单后，引导用户用 `/doc-update` 或 `/doc-doctor` 走第二阶段填充。
 
 ## 不做什么
@@ -31,4 +31,4 @@ description: "Initialize the documentation library when the current project has 
 
 - 必须等用户 yes 之后才写文件。
 - 全程 UTF-8 / 不带 BOM / LF 行尾。
-- `_index.md` / `main-module.md` 写入后必须经 `doc-write-utf8.py` 兜底（默认模式自动修复，不要用 `--check`，因为 `--check` 只校验不修复）。
+- `_index.md` / `main-module.md` 写入后必须经 `convert-to-utf8.sh` 兜底（自动修复，不依赖 `--check` 模式）。

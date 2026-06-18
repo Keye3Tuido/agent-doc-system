@@ -37,12 +37,6 @@ done
 
 安装后直接使用 `/doc-init`、`/doc-update` 等 slash command。
 
-可选：在项目 `CLAUDE.md` 中追加触发片段，让 agent 自动调用 `/doc-context`：
-
-```bash
-cat agent-doc-system/templates/claude-md-snippet.md >> CLAUDE.md
-```
-
 #### Kiro IDE
 
 推荐方式：**复制**（Kiro 不支持软链接形式的 skill 目录）
@@ -152,7 +146,7 @@ agent-doc-system/
 ├── scripts/         # 工具脚本
 ├── skills/          # 9 个 skill（含 doc-context）
 ├── installers/      # install-global.py
-└── templates/       # _index.md, main-module.md, claude-md-snippet.md
+└── templates/       # _index.md, main-module.md
 ```
 
 安装后对应 `~/.agent-docs/` 下的同名子目录；项目文档库存放在 `<project>/.agent-docs/`。

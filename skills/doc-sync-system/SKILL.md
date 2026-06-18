@@ -44,8 +44,8 @@ description: "Download and install the latest doc-system package (skills + scrip
 6. 把完整变更清单转给用户，等用户 yes 才继续。
 7. 用户确认后：
    - 复制 `~/.agent-docs/` 的所有内容（skills、scripts、manual、templates、installers、urls.conf、README.md）到 `~/.agent-docs/.backup/<时间戳>/`（用 `shutil.copytree` 或 `cp -a`，不要用 `fs_write`）。
-   - **二进制安全拷贝**：用 `shutil.copy2(src, dst)` 或 `cp <src> <dst>` 把解压后的文件逐个搬到目标位置。**禁止使用 `fs_write` 写入 zip 抽出的内容**——`fs_write` 在中文系统有把 UTF-8 误存为 GBK 的历史 bug，会破坏 zip 包内的编码。
-   - 拷贝完成后，对每个新写入的文件逐个跑 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path> --check` 兜底校验（任意一个失败就回滚到 `.backup/<时间戳>/`）。注意：`doc-encoding-check.py` 只覆盖项目级 `.agent-docs/` 目录，不适用于全局 `~/.agent-docs/` 的 skill / script 安装校验。
+   - 用 `shutil.copy2(src, dst)` 或 `cp <src> <dst>` 把解压后的文件逐个搬到目标位置（zip 抽出内容用 `cp` 而非 `fs_write`，避免编码转换风险）。
+    - 拷贝完成后，对每个新写入的文件逐个跑 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底。任意一个失败就回滚到 `.backup/<时间戳>/`。
    - 输出最终摘要（与脚本 INSTALLED 段一致）。
    - 清理 `<project>/.agent-docs/.tmp/` 下的临时 zip 与解压目录。
 

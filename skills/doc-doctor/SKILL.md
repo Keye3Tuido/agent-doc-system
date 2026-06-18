@@ -18,7 +18,7 @@ description: "Check, organize, and archive the project documentation library. Ru
 4. **structure 字段验证**（仅对有 `structure` 字段的文档执行）：
    - 检查 `structure.deps` 中引用的模块路径是否存在于当前项目（主仓库路径或 `.gitmodules` 中的子模块路径）。
    - 不存在的依赖标记为警告（不阻塞，因为可能是外部库或已移除的模块）。
-   - 检查 `structure.exports` 和 `structure.inner` 的基本格式完整性（必填字段是否存在）。
+   - 检查 `structure.exports` 的基本格式完整性（必填字段是否存在）。
 
 4.5 **structure 三类 advisory（不阻断，仅汇总）**：
 
@@ -33,9 +33,24 @@ description: "Check, organize, and archive the project documentation library. Ru
         - 若缓存中 `fp == current_fp` 但 `doc_mtime > cache.doc_mtime` → 警告 `> [doc-doctor] 正文已改但 structure 未刷，请跑 /doc-update <module> 重提`。
         - 若 `fp != current_fp` → 更新缓存，不报警（说明 import 已跑过）。
 
-   c. **structure 空值堆积**：模块代码非空（`find_source_files` 返回 ≥ 1）但 `structure.deps + exports + inner` 三项总条目 < 3 → 警告 `> [doc-doctor] <doc> structure 几乎为空，可能脚本提取失败或语言不支持`。
+   c. **structure 空值堆积**：模块代码非空（`find_source_files` 返回 ≥ 1）但 `structure.deps + exports` 两项总条目 < 3 → 警告 `> [doc-doctor] <doc> structure 几乎为空，可能脚本提取失败或语言不支持`。
 
    d. **占位章节统计**：扫每份文档统计含 `_待生成_` 的章节数量，超过 5 章 → 提醒用户用 `/doc-update` 充实。
+
+   e. **yaml 字段白名单检查**：
+      - 对照手册 §9 的允许字段表，检查每份文档 yaml frontmatter 是否包含表中未列出的顶层键。
+      - 若有 → 警告 `> [doc-doctor] <doc> 包含不允许字段 <key>，请跑 /doc-update <module> 清理`。
+      - 汇总清单，在改动清单中列为"冗余字段清理"类。
+
+   e. **_index.md 表格一致性检查**：
+      - 检查 `_index.md` 的活跃子模块表和归档子模块表。
+      - 若表格中有实际条目但**同时存在模板占位行**（如 `_（暂无归档）_`、`_（pending first scan）_`），标记为格式问题。
+      - 若表格中有多余的纯分隔行（相邻两行都是 `|---|---|` 无数据），同样标记。
+
+   f. **业务逻辑章节检查**：
+      - 扫每份文档是否包含 `## 业务逻辑` 章节。
+      - 若缺失，警告 `> [doc-doctor] <doc> 缺少 ## 业务逻辑 章节，请跑 /doc-update <module> 补全`。
+      - 汇总缺失清单，在改动清单中列为"章节补全"类。
 5. **Schema版本检查与升级**：
    - 检查每份文档 yaml frontmatter 中的 `schema_version` 字段。
    - 对比全局手册 `~/.agent-docs/manual/doc-system.md` 中的当前 schema 版本。
@@ -50,24 +65,23 @@ description: "Check, organize, and archive the project documentation library. Ru
    - 若文档缺少 `schema_version` 字段，添加为手册当前版本并按上述流程补全
 6. 对 `ARCHIVED_BUT_ACTIVE` 项：提议去掉 `archived` / `archived_at` / `archived_reason` 字段，刷新 `commit`，并在 `_index.md` 中从归档区移回活跃区。
 7. 把所有问题聚合到一张"将要执行的改动清单"，按以下分类：
-   - 编码 / 换行修复：使用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 修复（自动检测 GBK/CRLF/BOM 并转换）
+   - 编码 / 换行修复：使用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 修复（自动检测/转换编码）
    - Schema版本升级：按新模板完整升级（更新版本号 + 补充新增字段 + 提取structure字段）
    - 元信息修复：`commit` 与远端不一致、必填字段缺失
    - 归档动作：`.gitmodules` 已不含的子模块文档标记 `archived: true`（文件留在 `modules/` 不移动）
    - 恢复动作：`ARCHIVED_BUT_ACTIVE` 的文档去掉归档标记，刷新 `commit`，移回 `_index.md` 活跃区
    - 重名冲突：四元组重复的文档需要合并
-6. 将改动清单写入审阅文件：
-   - 先用 `fs_write` 把清单写到 `<project>/.agent-docs/.tmp/diff-staging.md`。
-   - 立即用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <project>/.agent-docs/.tmp/diff-staging.md` 修复编码（兜底 fs_write 的 GBK 漏写）。
-   - 再调用：
-     ```
-     python3 ~/.agent-docs/scripts/doc-diff-propose.py <project_root> --from <project>/.agent-docs/.tmp/diff-staging.md --title "doc-doctor: N issues"
-     ```
-7. 告知用户：**"诊断结果已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes 执行。"** 对话中只需一句话概要（如"发现 3 项编码问题 + 2 项归档"）。
-8. **必须等用户回复 yes 之后**才动手。
-9. 执行批量改动：
-   - 元信息 / 归档动作的 yaml 修改：用 `fs_write` 写入修改后的 markdown，再立即调用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 兜底（自动修复 GBK / BOM / CRLF）。
-   - 仅编码 / 换行问题（无 yaml 改动）的文档：直接 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 原地修复。
+   - 索引格式修复：`_index.md` 表格中的模板占位残留、多余分隔行
+   - 章节补全：缺少 `## 业务逻辑` 等必选章节
+   - 冗余字段清理：文档 yaml 中包含已删除字段，需 `/doc-update` 清理
+8. 将改动清单写入审阅文件：
+   - 直接用 `fs_write` 把清单写入 `<project>/.agent-docs/.tmp/pending-review.md`。
+   - 立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md` 修复编码。
+9. 告知用户：**"诊断结果已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes 执行。"** 对话中只需一句话概要（如"发现 3 项编码问题 + 2 项归档"）。
+10. **必须等用户回复 yes 之后**才动手。
+11. 执行批量改动：
+   - 元信息 / 归档动作的 yaml 修改：用 `fs_write` 写入修改后的 markdown，再立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底。
+   - 仅编码 / 换行问题（无 yaml 改动）的文档：直接 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 原地修复。
 
 ## 硬约束
 

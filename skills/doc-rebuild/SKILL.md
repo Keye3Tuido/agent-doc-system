@@ -13,12 +13,8 @@ description: "Fully rebuild the project documentation library from scratch. Clea
    - `doc-library/modules/` 下所有 `.md` 文件（删除，含归档标记的文档）
    - `_index.md`（保留顶部 `project_config`，主模块 / 活跃子模块 / 归档子模块三张表清空）
 3. 将清单写入审阅文件：
-   - 先用 `fs_write` 把清单写到 `<project>/.agent-docs/.tmp/diff-staging.md`。
-   - 立即用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <project>/.agent-docs/.tmp/diff-staging.md` 修复编码（兜底 fs_write 的 GBK 漏写）。
-   - 再调用：
-     ```
-     python3 ~/.agent-docs/scripts/doc-diff-propose.py <project_root> --from <project>/.agent-docs/.tmp/diff-staging.md --title "doc-rebuild: clear N files"
-     ```
+   - 直接用 `fs_write` 把清单写入 `<project>/.agent-docs/.tmp/pending-review.md`。
+   - 立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md` 修复编码。
 4. 告知用户：**"重建清单已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes 继续。"**
 5. **必须等用户回复 yes 之后**才动手。
 6. 执行清理动作。
@@ -26,9 +22,9 @@ description: "Fully rebuild the project documentation library from scratch. Clea
 8. 等用户再次确认清单后，进入第二阶段：逐份填充文档内容。每份文档：
    - **使用手册当前 schema 版本**：读取 `~/.agent-docs/manual/doc-system.md` 中的当前 schema 版本，所有新建文档的 `schema_version` 字段必须使用该版本。
    - **按当前模板生成**：对照 `~/.agent-docs/templates/` 中的模板文件和手册§9的schema定义，确保文档结构和字段完整符合当前版本要求。
-   - 扫描对应子模块源码，提取 `structure` 字段（deps/exports/inner），填充到 yaml frontmatter。
+   - 扫描对应子模块源码，提取 `structure` 字段（deps/exports），填充到 yaml frontmatter。
    - 用 `fs_write` 写入 markdown 内容到目标路径。
-   - 立即调用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 兜底（自动检测并修复 GBK / BOM / CRLF）。
+   - 立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（自动检测并修复 GBK / BOM / CRLF）。
 9. 全部落地后，**自动**把 `_index.md` 顶部 `project_config.initial_bootstrap_done` 改为 `true`。
 
 ## 硬约束

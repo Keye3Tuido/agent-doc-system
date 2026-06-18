@@ -33,7 +33,7 @@ description: "Load project documentation library as context before answering que
 
    - 第一步：仅加载文档的 yaml frontmatter（含 `structure` 字段）作为快速索引。文件 `Read` 时只读到首个 `---` 闭合行即可。
    - 第二步：根据用户问题语义判定是否需要正文：
-     - 问"接口/数据结构/依赖/导出符号"等结构化问题 → `structure.exports` / `deps` / `inner` 即可回答，**跳过正文 Read**。
+     - 问"接口/数据结构/依赖/导出符号"等结构化问题 → `structure.exports` / `deps` 即可回答，**跳过正文 Read**。
      - 问"流程/职责/警示/协作关系"等叙述性问题 → 加载正文。
    - 跨模块查询（如"改 A 影响谁"）：先读 A 文档的 `structure.deps[].m` 与 `cross_module_contracts[].with`，反向索引到下游模块；再按需加载下游文档。
    - 此策略仅在大型项目（≥ 30 子模块）或用户问题明显是结构化查询时启用；小项目可直接全量 Read。

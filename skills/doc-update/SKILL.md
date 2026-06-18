@@ -44,8 +44,7 @@ description: "Update existing documentation files for one or all submodules in t
      - 对照手册§9的schema定义，补充**所有**新增字段（必填+可选）
      - 对照`~/.agent-docs/templates/`中的模板文件，确保文档结构符合新模板要求
      - 对于schema v4+，必须提取并填充`structure`字段（deps/exports/inner）
-   - 若文档缺少`schema_version`字段，添加为手册当前版本并按上述流程补全
-3. 若文档状态为 `ARCHIVED_BUT_ACTIVE`：去掉 `archived` / `archived_at` / `archived_reason` 字段，将其从 `_index.md` 归档区移回活跃区。
+   - 若文档缺少`schema_version`字段，添加为手册当前版本并按上述流程补全   - **冗余字段清理**：升级完成后，对照手册 §9 的允许字段表，删除 yaml frontmatter 中所有不在表中的顶层键及其子键。只保留表中列出的字段，其余一律移除，保持文档瘦身。3. 若文档状态为 `ARCHIVED_BUT_ACTIVE`：去掉 `archived` / `archived_at` / `archived_reason` 字段，将其从 `_index.md` 归档区移回活跃区。
 4. **STALE 内容判定**（按手册 §4 第 6 条；仅 stale 目标走此步）：在子模块目录内执行 `git log --oneline <doc_sha>..<remote_sha>`，对照 §7 触发条件逐条审视：
    - 仅当**所有**提交均属"实现细节调整 / bug 修复 / 不影响接口/职责/数据契约/流程"时，方可只刷新 `commit` 字段。
    - 任意提交触及 §7 条件，必须对应章节同步更新；commit message 信息不足时进一步看 `git log -p <doc_sha>..<remote_sha> --stat` 或具体文件 diff。
@@ -55,7 +54,7 @@ description: "Update existing documentation files for one or all submodules in t
    - **粒度补充判定**（仅粒度候选走此分支；stale 目标不走）：
      - 依据是 agent 本次对话中**实际读过**的源码区域，禁止凭推测扩写。
      - 仅当文档**已存在章节**对该区域的描述粒度显著低于代码实际复杂度（例：模块在架构图中只占一行、关键流程缺失、对外接口未列出）时，准备补充改动。
-     - 仅补充架构 / 职责边界 / 关键流程 / 接口 / 数据契约层面的信息；**不写实现细节、不写行号、不写具体常数**（参见 §6）。
+     - 仅补充架构 / 职责边界 / 业务逻辑 / 关键流程 / 接口 / 数据契约层面的信息；**不写实现细节、不写行号、不写具体常数**（参见 §6）。
      - 不引入新章节，仅扩写已有章节。
      - 粒度差距不显著（文档已抓住要点）→ 跳过该目标，不出 diff。
    - **structure 字段提取**（stale 目标与粒度候选均执行；文档缺少 `structure` 字段时**必须**执行）：
@@ -63,23 +62,38 @@ description: "Update existing documentation files for one or all submodules in t
        ```
        python3 ~/.agent-docs/scripts/doc-structure-import.py <doc_path> <module_path> <project_root>
        ```
-     - 脚本内部调用 `doc-structure-extract.py`，将 deps/exports/inner 写入文档 YAML frontmatter 的 `structure` 字段，覆盖已有值。
+     - 脚本内部调用 `doc-structure-extract.py`，将 deps/exports 写入文档 YAML frontmatter 的 `structure` 字段，覆盖已有值。
      - 脚本输出 `OK: <doc_path>` 表示成功；`ERROR: ...` 表示失败（需人工介入）。
+   - **cross_module_contracts 回填**（stale 目标与粒度候选均执行，如正文涉及协作关系变化）：
+     - 若文档 `## 协作关系` 章节描述了与其他模块的 delegate / callback / event / message 等协作关系，**必须**同步填充 `structure.cross_module_contracts`。格式参考手册 §9：每项含 `with`（目标模块）、`protocol`（`delegate` / `callback` / `event` / `message` / `rpc` / `inherit` / `ecs` / `di` / `observer-bus` / `state-machine`）、`interface`（接口名）、`direction`（`inbound` / `outbound` / `bidirectional`）、`note`。
+     - **原则**：正文写了什么协作关系，structure 就要有对应条目。只回填正文已描述的内容，禁止凭空编造。
+   - **业务逻辑章节**（stale 目标与粒度候选均执行）：
+     - 检查文档是否有 `## 业务逻辑` 章节。若无，按手册 §8 模板新增该章节。
+     - 内容：列出本模块参与/主导的业务场景，每个场景标注入口（哪个类/方法触发）、本模块负责什么、产出/下游、涉及的核心文件及职责。
+     - 依据：agent 本次对话中实际读过的源码和已掌握的模块定位。不凭空编造业务场景。
 6. 若该文档还是首次落地骨架（章节为空或仅占位），按当前掌握的信息补充对应章节。
 7. 同步刷新元信息中的 `commit` 字段（子模块文档；粒度候选不刷 commit，因为代码未变）。
 8. 新建文档时使用 `python3 ~/.agent-docs/scripts/doc-scaffold.py <module_path> <project_root>` 生成骨架。
-9. 写入文档：用 `fs_write` 写入 markdown 内容后，立即调用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 兜底（自动检测并修复 GBK / BOM / CRLF）。
+9. 写入文档：用 `fs_write` 写入 markdown 内容后，立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（自动检测并修复 GBK / BOM / CRLF）。
 
 ### 阶段 C：输出与审批
 
+0. **initial_bootstrap_done 翻转检查**（手册 §13）：
+   - 检查 `_index.md` 的 `project_config.initial_bootstrap_done` 字段。
+   - 若为 `false` 且以下条件**全部**满足，则在本次 diff 中包含将其改为 `true`：
+     - `.gitmodules` 中所有子模块（经 slug 映射后）在 `_index.md` 活跃子模块表中均有对应条目。
+     - 所有活跃子模块对应的文档均非骨架——至少 `## 定位` 和 `## 职责边界` 两个章节有实质内容（非 `_待生成_`、非空）。
+     - 主模块文档 `main-module.md` 至少 `## 定位` 有实质内容。
+   - 条件不满足则不翻，留待后续 `/doc-update` 完成后再翻。
 1. 将全部改动以 unified diff 格式写入审阅文件：
-   - 先用 `fs_write` 把 diff 内容存到 `<project>/.agent-docs/.tmp/diff-staging.md`。
-   - 立即用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <project>/.agent-docs/.tmp/diff-staging.md` 修复编码（fs_write 中文环境可能写 GBK，下一步 doc-diff-propose.py 严格读 UTF-8 会失败）。
-   - 再调用：
+   - 将修改后的文档内容用 `fs_write` 写入 `<project>/.agent-docs/.tmp/doc-new.md`。
+   - 调用 diff 脚本生成 unified diff：
      ```
-     python3 ~/.agent-docs/scripts/doc-diff-propose.py <project_root> --from <project>/.agent-docs/.tmp/diff-staging.md --title "doc-update: N files"
+     python3 ~/.agent-docs/scripts/doc-diff.py --old <原始文档路径> --new <project>/.agent-docs/.tmp/doc-new.md --out <project>/.agent-docs/.tmp/pending-review.md
      ```
-   - **禁止使用 stdin 管道**（脚本不再支持 stdin）。
+   - 立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md` 修复编码。
+   - 清理临时文件 `<project>/.agent-docs/.tmp/doc-new.md`。
+   - 若涉及多个文档，按上述流程逐个生成 diff，全部追加到同一 `pending-review.md`。
 2. 告知用户：**"改动已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes 落盘。"**
 3. **禁止将大段 diff 逐字输出到对话框**。对话中只需一句话说明改动概要（如"3 份 sha 刷新 + 1 份内容更新"）。
 4. **只有用户回复 yes 之后**才写文件。回复 no 或修改建议则按用户意见调整后重新生成审阅文件。
@@ -97,5 +111,5 @@ description: "Update existing documentation files for one or all submodules in t
 - **structure 同步刷新（强不变量，对应手册 §7）**：本流程对任一文档的正文做出变动时，**必须**重跑 `python3 ~/.agent-docs/scripts/doc-structure-import.py <doc_path> <module_path> <project_root>` 覆盖 structure 字段。三种情形均适用：(a) sha 漂移内容刷新；(b) 粒度补充扩写；(c) schema 升级补字段。**正文每改一次 → structure 必须同步重提**；漏刷 = doctor 视为不一致警告。
 - **触发条件扩展（对应手册 §7）**：
   - 协作关系变化（`cross_module_contracts` 候选清单变更）→ 触发对应章节更新
-  - 模块边界数据流变化（`data_flow_anchors` 变更）→ 触发主模块 `## 跨模块数据流`
   - 子模块 `## 典型修改场景` **永不自动触发**——纯经验沉淀，仅用户主动要求时维护
+- **正文 ↔ structure 双向一致**：正文中描述的协作关系必须回填 `cross_module_contracts`。正文写多少，structure 就回填多少。

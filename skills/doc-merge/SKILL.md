@@ -38,8 +38,8 @@ description: "Merge documentation libraries from one or more other projects into
 对每份"同主键重叠"文档，**当前项目存在该文档**：
 
 1. 按 §8 文档模板切分章节。**章节清单从硬编码改为读取手册 §8 当前定义**：
-   - 主模块：通用 13 章 + §8.1-§8.4 附加（`框架总览` / `业务主循环` / `跨模块数据流` / `模块协同模式`），共 17 章
-   - 子模块：通用 13 章 + §8.5-§8.6 附加（`协作关系` / `典型修改场景`），共 15 章
+   - 主模块：通用 14 章 + §8.1-§8.4 附加（`框架总览` / `业务主循环` / `跨模块数据流` / `模块协同模式`），共 18 章
+   - 子模块：通用 14 章 + §8.5-§8.6 附加（`协作关系` / `典型修改场景`），共 16 章
    - 切分前先读 `~/.agent-docs/manual/doc-system.md` §8 确认当前章节集合
 2. 对每个章节，从"当前文档 + 所有外部副本"中收集所有候选段落/列表项/接口列表/路径等差异点。
 3. 对每个差异点，**去当前项目源码实际查证**（验证策略见下方）：
@@ -53,7 +53,8 @@ description: "Merge documentation libraries from one or more other projects into
 
 **验证策略指引（含新章节）**：
 
-- 「定位 / 职责边界 / 警示」类描述性章节：grep 关键类名、模块说明文档、README 是否一致。
+- 「定位 / 职责边界 / 业务逻辑 / 警示」类描述性章节：grep 关键类名、模块说明文档、README 是否一致。
+- 「业务逻辑」：验依据 = 实际入口类调用链 + 业务流程中涉及的核心文件
 - 「架构」：读子模块顶层 `.hpp` / `CMakeLists.txt` / `Android.mk` 等，对比是否符合描述的分层、关键类。
 - 「接口 / 数据契约」：grep 描述提到的类名、方法名、字段名，确认存在于当前代码中。
 - 「依赖」：对照 `.gitmodules`、`CMakeLists.txt` 的 `target_link_libraries`、第三方库引用语句。
@@ -62,7 +63,7 @@ description: "Merge documentation libraries from one or more other projects into
 - 「使用约束 / 可观测性」：grep 日志 tag、断言、并发原语。
 - 「框架总览」（主模块）：验依据 = 分层目录 + `.gitmodules` 实际结构；不一致丢弃
 - 「业务主循环」（主模块）：验依据 = 入口类的初始化 / 主循环代码
-- 「跨模块数据流」（主模块）：验依据 = `data_flow_anchors` 候选 + 实际跨模块数据持有者
+- 「跨模块数据流」（主模块）：验依据 = 实际跨模块数据持有者（代码中跨子模块共享的数据结构）
 - 「模块协同模式」（主模块）：验依据 = `cross_module_contracts` 实际识别结果
 - 「协作关系」（子模块）：验依据 = `cross_module_contracts` 字段；不一致丢弃
 - 「典型修改场景」（子模块）：**经验类章节，不做实际项目验证**，按"信息密度更高且不与现状矛盾"取舍；都为空保留 `_待生成_`
@@ -78,12 +79,8 @@ description: "Merge documentation libraries from one or more other projects into
 
 把阶段 1 + 2 的产物聚合为一份审阅文件：
 
-- 先用 `fs_write` 把合并清单写到 `<project>/.agent-docs/.tmp/diff-staging.md`。
-- 立即用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <project>/.agent-docs/.tmp/diff-staging.md` 修复编码（兜底 fs_write 的 GBK 漏写）。
-- 再调用：
-  ```
-  python3 ~/.agent-docs/scripts/doc-diff-propose.py <project_root> --from <project>/.agent-docs/.tmp/diff-staging.md --title "doc-merge: N actions"
-  ```
+- 直接用 `fs_write` 把合并清单写入 `<project>/.agent-docs/.tmp/pending-review.md`。
+- 立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md` 修复编码。
 
 清单分类：
 
@@ -101,7 +98,7 @@ description: "Merge documentation libraries from one or more other projects into
 用户回复合法 yes 后：
 
 1. 解析 yes 中嵌入的 B/D 类裁决参数。无裁决项默认按"跳过"处理。
-2. 写入所有合并 / 新增文档：用 `fs_write` 写入后立即调用 `python3 ~/.agent-docs/scripts/doc-write-utf8.py <path>` 兜底（自动修复 GBK / BOM / CRLF）。
+2. 写入所有合并 / 新增文档：用 `fs_write` 写入后立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（自动修复 GBK / BOM / CRLF）。
 3. 同步更新 `_index.md` 的活跃子模块表 / 归档子模块表。**不修改 `project_config`**。
 4. 调用 §10 归档规则做兜底校验（确保 archived 标记字段齐全）。
 5. 输出最终 unified diff 到审阅文件并告知用户成功。
@@ -121,7 +118,7 @@ description: "Merge documentation libraries from one or more other projects into
 - **B 类、D 类必须经用户裁决**，agent 不得擅自决定。
 - 章节级合并时，每个差异点必须有明确的"实际项目验证"动作（读源码、读配置、读 .gitmodules），不能凭推测。
 - 写文件强制 UTF-8 / 无 BOM / LF / 无句中硬换行。
-- diff 必须通过 `doc-diff-propose.py` 写入审阅文件，**禁止逐字输出到对话**。
+- diff 必须通过 `fs_write` 直接写入 `pending-review.md` 审阅文件，**禁止逐字输出到对话**。
 - 单次 diff 总行数 > 300 行 → 自动按"一份文档一块"拆分（§11）。
 
 ## 失败回滚

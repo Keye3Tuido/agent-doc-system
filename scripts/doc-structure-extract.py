@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-doc-structure-extract.py — 从源码提取结构化关系数据（deps/exports/inner）
+doc-structure-extract.py — 从源码提取结构化关系数据（deps/exports）
 
 用法: python3 doc-structure-extract.py <module_path> [project_root]
 

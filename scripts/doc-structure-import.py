@@ -22,9 +22,7 @@ import sys
 ALLOWED_STRUCTURE_KEYS = {
     "deps",
     "exports",
-    "inner",
     "cross_module_contracts",
-    "data_flow_anchors",
 }
 
 
@@ -118,7 +116,7 @@ def build_structure_yaml(data):
     sections = []
     # 按白名单顺序输出（保证稳定 diff），未知键追加在末尾
     ordered_keys = [k for k in (
-        "deps", "exports", "inner", "cross_module_contracts", "data_flow_anchors",
+        "deps", "exports", "cross_module_contracts",
     ) if k in data]
     ordered_keys += [k for k in data.keys() if k not in ALLOWED_STRUCTURE_KEYS]
 
