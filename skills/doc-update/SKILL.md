@@ -87,13 +87,11 @@ description: "Update existing documentation files for one or all submodules in t
    - 条件不满足则不翻，留待后续 `/doc-update` 完成后再翻。
 1. 将全部改动以 unified diff 格式写入审阅文件：
    - 将修改后的文档内容用 `fs_write` 写入 `<project>/.agent-docs/.tmp/doc-new.md`。
-   - 调用 diff 脚本生成 unified diff：
-     ```
-     python3 ~/.agent-docs/scripts/doc-diff.py --old <原始文档路径> --new <project>/.agent-docs/.tmp/doc-new.md --out <project>/.agent-docs/.tmp/pending-review.md
-     ```
-   - 立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md` 修复编码。
+   - 立即 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/doc-new.md`。
+   - 生成 unified diff：`python3 ~/.agent-docs/scripts/doc-diff.py --old <原始文档> --new <project>/.agent-docs/.tmp/doc-new.md --out <project>/.agent-docs/.tmp/pending-review.md`
+   - 立即 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md`。
    - 清理临时文件 `<project>/.agent-docs/.tmp/doc-new.md`。
-   - 若涉及多个文档，按上述流程逐个生成 diff，全部追加到同一 `pending-review.md`。
+   - 若涉及多个文档，按上述流程逐个生成，全部追加到同一 `pending-review.md`。
 2. 告知用户：**"改动已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes 落盘。"**
 3. **禁止将大段 diff 逐字输出到对话框**。对话中只需一句话说明改动概要（如"3 份 sha 刷新 + 1 份内容更新"）。
 4. **只有用户回复 yes 之后**才写文件。回复 no 或修改建议则按用户意见调整后重新生成审阅文件。

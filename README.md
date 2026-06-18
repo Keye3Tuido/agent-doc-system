@@ -115,41 +115,39 @@ done
 ### 方式二：手动运行脚本
 
 ```bash
-python3 ~/.agent-docs/installers/install-global.py --upgrade
+python3 ~/.agent-docs/installers/install-global.py --upgrade --purge
 ```
 
-此命令仅更新全局 `~/.agent-docs/` 目录。完成后需自行同步 IDE 侧：
-
-- **软链接方式**：无需额外操作。
-- **复制方式**：重新执行复制命令（参见"第二步"中对应 IDE 的 `cp -R` 命令）。
+`--purge` 会清理目标目录中在新版本不再存在的过时文件。
 
 ## Skills
 
-| 指令                     | 用途                                                                          |
-| ------------------------ | ----------------------------------------------------------------------------- |
-| `/doc-context`         | 业务对话中加载项目文档库作为上下文（只读，不阻断对话）                        |
-| `/doc-init`            | 初始化文档库。仅在本地无文档库时使用。                                        |
-| `/doc-update [module]` | 更新文档。比较远端 sha 与文档记录、内容是否冲突，输出 diff 等用户确认后落盘。 |
-| `/doc-rebuild`         | 全量重建文档库。                                                              |
-| `/doc-merge <path...>` | 合并其他项目的文档库到当前项目。                                              |
-| `/doc-doctor`          | 检查文档格式是否规范（编码、命名、schema、归档状态），批量修复。              |
-| `/doc-prune`           | 物理删除归档中的孤儿文档。                                                    |
-| `/doc-tree`            | 输出文档库中所有文档的结构清单。                                              |
-| `/doc-sync-system`     | 拉取最新版本的 skill 包并安装。                                               |
+| 指令 | 用途 |
+|---|---|
+| `/doc-context` | 加载文档库作为上下文。两步加载：yml 快速索引 → 按需读正文 |
+| `/doc-init` | 初始化新项目的文档库（第一阶段：扫子模块出清单） |
+| `/doc-update [module]` | 更新文档。sha 漂移检测 → 内容刷新 → diff 审批 → 落盘 |
+| `/doc-doctor` | 健康检查：编码/schema/命名/归档/冗余字段/章节缺失 |
+| `/doc-rebuild` | 全量重建文档库，先列清单等确认 |
+| `/doc-prune` | 物理删除孤儿归档文档，先列清单等确认 |
+| `/doc-merge <path>` | 跨项目合并文档库，章节级验证 + 实际代码对账 |
+| `/doc-tree` | 只读输出文档库结构树 |
+| `/doc-sync-system` | 拉取最新 skill 包并安装，脚本失败时 agent 代理 |
 
 ## 目录结构
 
 ```
 agent-doc-system/
-├── urls.conf        # 下载链接配置（统一维护）
-├── manual/          # 全局手册（doc-system.md）
-├── scripts/         # 工具脚本
-├── skills/          # 9 个 skill（含 doc-context）
-├── installers/      # install-global.py
-└── templates/       # _index.md, main-module.md
+├── README.md
+├── urls.conf
+├── manual/doc-system.md     # 全局操作手册（16 章）
+├── scripts/                 # 10 个工具脚本
+├── skills/                  # 9 个 doc-* skill
+├── installers/install-global.py
+└── templates/               # _index.md, main-module.md（schema v5）
 ```
 
-安装后对应 `~/.agent-docs/` 下的同名子目录；项目文档库存放在 `<project>/.agent-docs/`。
+安装后 → `~/.agent-docs/`；项目文档库 → `<project>/.agent-docs/`。
 
 ## 迁移方法
 
