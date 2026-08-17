@@ -1,10 +1,5 @@
 ---
-schema_version: 5
-agent_load: always
-structure:
-  deps: []
-  exports: []
-  cross_module_contracts: []
+schema_version: 7
 ---
 
 # 主模块文档（待生成）

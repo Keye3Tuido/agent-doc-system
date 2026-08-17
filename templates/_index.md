@@ -1,6 +1,5 @@
 ---
-schema_version: 5
-agent_load: always
+schema_version: 7
 project_config:
   repo_root_marker: "<主仓库 origin URL，例如 https://github.com/foo/Bar.git>"
   submodule_mechanism: "git-submodule"
@@ -16,6 +15,8 @@ project_config:
 > 顶部 `project_config` 是当前项目的耦合配置。全局 `doc-system.md` 中的 `{{字段名}}` 占位符均指向本块字段。
 >
 > 本文件由 agent 在每次结构性变动（新增 / 归档 / 重命名 / 合并子模块）后**提议** diff，由用户审批后落库。日常 sha 漂移不触发本文件的修改，只触发 `doc-library/modules/` 下对应文档的 commit 字段刷新。
+>
+> 下方「活跃子模块」与「归档子模块」两张表是**派生视图**，唯一事实源是各文档自身的 yaml frontmatter 与 `## 定位` 章节。**不要手工维护这两张表**，用脚本再生：`python3 ~/.agent-docs/scripts/doc-tree.py <project_root> --emit-index-tables`。
 
 ---
 
@@ -37,15 +38,17 @@ project_config:
 
 ## 活跃子模块
 
-> 首次落地尚未完成。第一阶段输出后由用户审批通过，第二阶段生成文档时填表。
+> 派生视图，由 `doc-tree.py --emit-index-tables` 再生，勿手工维护。
 
 | 文件 | repo | branch | 一句话定位 |
 |---|---|---|---|
-| _（pending first scan）_ | | | |
+| _（暂无）_ | | | |
 
 ---
 
 ## 归档子模块
+
+> 派生视图，由 `doc-tree.py --emit-index-tables` 再生，勿手工维护。
 
 | 文件 | 原 repo | 原 branch | 归档原因 |
 |---|---|---|---|

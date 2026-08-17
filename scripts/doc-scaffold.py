@@ -9,15 +9,40 @@ doc-scaffold.py — 从子模块路径自动生成文档骨架。
 功能:
   - 从 git remote 获取 origin URL
   - 从 git 获取当前分支和远端 sha
-  - 解析 URL 生成 origin_host / owner / name
+  - 解析 URL 得出 host / owner / name，仅用于生成文件名（不写入 yaml）
   - 生成符合 schema 的 yaml 头 + 空章节模板
   - 输出到 stdout（不直接写文件，由调用方决定写入位置）
 """
 
+import hashlib
 import os
 import re
 import subprocess
 import sys
+
+
+def current_schema_version():
+    """从手册 yaml 头读取当前 schema 版本，避免在此硬编码后漂移。
+
+    手册是 schema 版本的唯一事实源（§9）。此前本脚本硬编码版本号，手册升到 v7 后
+    骨架仍输出 v6，导致新生成的文档一出来就被判为过时版本。
+    """
+    manual = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "manual", "doc-system.md")
+    try:
+        with open(manual, "r", encoding="utf-8") as f:
+            for line in f.read().split("\n")[:10]:
+                m = re.match(r"^schema_version:\s*(\S+)", line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    print("ERROR: 无法从手册读取 schema_version，请检查 manual/doc-system.md",
+          file=sys.stderr)
+    sys.exit(2)
+
+
+SCHEMA_VERSION = current_schema_version()
 
 
 def run_git(args, cwd):
@@ -38,21 +63,45 @@ def run_git(args, cwd):
 
 
 def parse_git_url(url):
-    """解析 git URL，返回 (host, owner, name)。"""
-    url = url.strip()
-    # SSH: git@host:owner/name.git
-    m = re.match(r"git@([^:]+):(.+)/([^/]+?)(?:\.git)?$", url)
+    """解析 git URL，返回 (host, owner, name, ok)。与 doc-format-check.py 保持一致。
+
+    ok=False 表示无法按已知形式解析。此时 name 由 URL 摘要派生，**保证不同 URL
+    不共享同一身份**——历史实现统一回落常量 unknown/unknown/unknown，会让两份
+    互不相关的文档被判为同一四元组，进而被提议合并或列入物理删除候选。
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return "unparsed", "unparsed", "empty", False
+
+    # scp-style: user@host[:port]:owner/name[.git]
+    m = re.match(r"^[\w.+-]+@([^:/]+):(?:(\d+):)?(.+?)/([^/]+?)(?:\.git)?/?$", raw)
     if m:
-        return m.group(1), m.group(2), m.group(3)
-    # SSH with port: git@host:port:owner/name.git
-    m = re.match(r"git@([^:]+):(\d+):(.+)/([^/]+?)(?:\.git)?$", url)
+        host = m.group(1) if not m.group(2) else f"{m.group(1)}:{m.group(2)}"
+        return host, m.group(3), m.group(4), True
+
+    # scheme://[user@]host[:port]/path
+    m = re.match(r"^(?:https?|ssh|git|ftps?)://(?:[^@/]+@)?([^/:]+)(?::(\d+))?/(.*)$", raw)
     if m:
-        return f"{m.group(1)}-{m.group(2)}", m.group(3), m.group(4)
-    # HTTPS: https://host/owner/name.git
-    m = re.match(r"https?://([^/]+)/(.+)/([^/]+?)(?:\.git)?$", url)
+        host = m.group(1) if not m.group(2) else f"{m.group(1)}:{m.group(2)}"
+        path = re.sub(r"\.git$", "", m.group(3).rstrip("/"))
+        parts = [p for p in path.split("/") if p]
+        if len(parts) >= 2:
+            return host, "/".join(parts[:-1]), parts[-1], True
+        if len(parts) == 1:
+            return host, "-", parts[0], True
+        return host, "-", "root", True
+
+    # file:// 或本地路径
+    m = re.match(r"^(?:file://)?(/.*|\.{1,2}/.*)$", raw)
     if m:
-        return m.group(1), m.group(2), m.group(3)
-    return "unknown", "unknown", "unknown"
+        path = re.sub(r"\.git$", "", m.group(1).rstrip("/"))
+        parts = [p for p in os.path.normpath(path).split("/") if p]
+        if parts:
+            owner = "/".join(parts[:-1]) if len(parts) >= 2 else "-"
+            return "local", owner, parts[-1], True
+
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+    return "unparsed", "unparsed", digest, False
 
 
 def slugify(s):
@@ -112,24 +161,22 @@ def main():
     if not remote_sha:
         remote_sha = run_git(["-C", abs_module, "rev-parse", "HEAD"], project_root)
 
-    host, owner, name = parse_git_url(origin_url)
+    host, owner, name, url_ok = parse_git_url(origin_url)
+    if not url_ok:
+        print(
+            f"WARNING: 无法按已知形式解析 origin URL: {origin_url}\n"
+            f"         文件名将使用摘要派生的唯一标识，身份不参与合并/删除判定。",
+            file=sys.stderr,
+        )
     filename = generate_filename(host, owner, name, branch)
 
     # 输出骨架
     output = f"""---
-schema_version: 5
-agent_load: on-demand
+schema_version: {SCHEMA_VERSION}
 repo: "{origin_url}"
-origin_host: "{host}"
-owner: "{owner}"
-name: "{name}"
 branch: "{branch}"
 commit: "{remote_sha or '0' * 40}"
 origin_path_in_main: "{module_path}"
-structure:
-  deps: []
-  exports: []
-  cross_module_contracts: []
 ---
 
 # {name}

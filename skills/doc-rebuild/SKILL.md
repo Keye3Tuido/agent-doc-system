@@ -18,14 +18,14 @@ description: "Fully rebuild the project documentation library from scratch. Clea
 4. 告知用户：**"重建清单已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes 继续。"**
 5. **必须等用户回复 yes 之后**才动手。
 6. 执行清理动作。
-7. 执行 §13 第一阶段：运行 `python3 ~/.agent-docs/scripts/doc-scaffold.py` 为每个子模块生成骨架，输出子模块清单（含路径、origin URL、branch、一句话定位草案）。
+7. 执行 §13 第一阶段：对每个子模块运行 `python3 ~/.agent-docs/scripts/doc-scaffold.py <module_path> <project_root>`，把骨架文本收集起来汇总成子模块清单（含路径、origin URL、branch、一句话定位草案）展示给用户。该脚本只输出到 stdout；**本阶段不写任何 `.md` 文件**（§13 第一阶段的硬要求）。
 8. 等用户再次确认清单后，进入第二阶段：逐份填充文档内容。每份文档：
    - **使用手册当前 schema 版本**：读取 `~/.agent-docs/manual/doc-system.md` 中的当前 schema 版本，所有新建文档的 `schema_version` 字段必须使用该版本。
    - **按当前模板生成**：对照 `~/.agent-docs/templates/` 中的模板文件和手册§9的schema定义，确保文档结构和字段完整符合当前版本要求。
-   - 扫描对应子模块源码，提取 `structure` 字段（deps/exports），填充到 yaml frontmatter。
+   - 扫描对应子模块源码，把结构信息写进正文的「架构」「接口」「数据契约」「依赖」等章节（v7 起 frontmatter 不承载结构数据）。
    - 用 `fs_write` 写入 markdown 内容到目标路径。
-   - 立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（自动检测并修复 GBK / BOM / CRLF）。
-9. 全部落地后，**自动**把 `_index.md` 顶部 `project_config.initial_bootstrap_done` 改为 `true`。
+   - 立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（默认模式修 BOM / CRLF / 孤立 CR；若不是合法 UTF-8 则拒绝改动并非零退出，此时必须重写该文件，见手册 §6.1）。
+9. 翻转 `initial_bootstrap_done`：按手册 §13 第二阶段末条的三项前置条件判定，满足则**在最后一份 diff 中提议**把 `_index.md` 顶部 `project_config.initial_bootstrap_done` 改为 `true`，与其他改动一同经用户审批落盘；不满足则不翻。**不得绕过审批直接写入。**
 
 ## 硬约束
 

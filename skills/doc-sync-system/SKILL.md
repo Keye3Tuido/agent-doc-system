@@ -20,12 +20,12 @@ description: "Download and install the latest doc-system package (skills + scrip
    ```
    python3 ~/.agent-docs/scripts/doc-sync-system.py --dry-run [--url <url>]
    ```
-2. 把 dry-run 输出（ADDED / REPLACED / UNCHANGED 文件清单）原样转给用户，等用户回复 yes 再继续。
+2. 把 dry-run 输出（ADDED / REPLACED / REMOVED / UNCHANGED 文件清单）原样转给用户，等用户回复 yes 再继续。`REMOVED` 只允许来自脚本内的显式 `OBSOLETE_PATHS` 迁移清单。
 3. 用户确认后正式执行：
    ```
    python3 ~/.agent-docs/scripts/doc-sync-system.py [--url <url>]
    ```
-4. 脚本会自动备份当前 `~/.agent-docs/` 的所有内容（skills、scripts、manual、templates、installers、urls.conf、README.md）到 `~/.agent-docs/.backup/<时间戳>/`，然后逐文件覆写。
+4. 脚本会自动备份当前 `~/.agent-docs/` 的所有内容（skills、scripts、manual、templates、installers、urls.conf、README.md）到 `~/.agent-docs/.backup/<时间戳>/`，然后逐文件覆写，并删除 `OBSOLETE_PATHS` 明确列出的已废弃文件。
 5. 把脚本的安装摘要（含 backup 路径）转给用户。
 6. 安装结束后，**重新加载手册** `~/.agent-docs/manual/doc-system.md`（提醒用户：下一对话起新规则才生效；当前对话内若已加载旧手册可继续按旧规则收尾）。
 
@@ -40,12 +40,14 @@ description: "Download and install the latest doc-system package (skills + scrip
    - 不存在 → ADDED
    - 内容相同（字节级） → UNCHANGED
    - 内容不同 → REPLACED
+   - 读取 zip 内 `scripts/doc-sync-system.py` 的 `OBSOLETE_PATHS`；清单内路径若已安装且 zip 不再包含 → REMOVED。不得自行推断或扩大删除范围
 5. 在第一条回复正文最开头打印 `> [doc-fetch-pending] 阶段 B 代理安装，N 文件待覆盖，备份路径 ~/.agent-docs/.backup/<时间戳>/`。
 6. 把完整变更清单转给用户，等用户 yes 才继续。
 7. 用户确认后：
    - 复制 `~/.agent-docs/` 的所有内容（skills、scripts、manual、templates、installers、urls.conf、README.md）到 `~/.agent-docs/.backup/<时间戳>/`（用 `shutil.copytree` 或 `cp -a`，不要用 `fs_write`）。
    - 用 `shutil.copy2(src, dst)` 或 `cp <src> <dst>` 把解压后的文件逐个搬到目标位置（zip 抽出内容用 `cp` 而非 `fs_write`，避免编码转换风险）。
-    - 拷贝完成后，对每个新写入的文件逐个跑 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底。任意一个失败就回滚到 `.backup/<时间戳>/`。
+   - 删除 dry-run 已列出的 REMOVED 文件；只允许删除 `OBSOLETE_PATHS` 中的精确路径。
+   - 拷贝完成后，对每个新写入的文件**逐个**跑 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底，并按**单文件**退出码决策。任意一个失败就回滚到 `.backup/<时间戳>/`。**不要对目录整体调用**——那样退出码是全目录累加的，一个无关文件判不出就会误触发整包回滚。
    - 输出最终摘要（与脚本 INSTALLED 段一致）。
    - 清理 `<project>/.agent-docs/.tmp/` 下的临时 zip 与解压目录。
 
@@ -65,7 +67,7 @@ description: "Download and install the latest doc-system package (skills + scrip
    - 将变更清单展示给用户，格式如：
      ```
      检测到以下 IDE 使用复制方式安装，需要同步更新：
-     - ~/.kiro/skills/  (copy 模式，N 个文件需更新)
+     - ~/.cursor/skills/  (copy 模式，N 个文件需更新)
        REPLACED: doc-update/SKILL.md
        ADDED:    doc-new/SKILL.md
      是否同步？(yes/no)
@@ -82,7 +84,7 @@ description: "Download and install the latest doc-system package (skills + scrip
 
 - **永远先备份再覆写**。无论阶段 A 还是 B，备份目录必须时间戳化、不覆盖既有备份。
 - **永远先 dry-run 再写入**。dry-run 输出必须给用户审阅，不得静默执行。
-- **只覆盖 zip 内列出的文件**。包外文件（用户自定义 skill / 脚本）不动。
+- **只覆盖 zip 内列出的文件**。唯一删除例外是 zip 内同步脚本 `OBSOLETE_PATHS` 明确列出的精确路径；其他包外文件（用户自定义 skill / 脚本）不动。
 - **只动 `~/.agent-docs/` 的同步目标内容**（skills、scripts、manual、templates、installers、urls.conf、README.md）。不碰 `~/.agent-docs/specs/`、`~/.agent-docs/hooks/`、`~/.agent-docs/.backup/` 等其他目录。
 - 安装完成后必须告知用户备份路径，便于回滚。
 - 阶段 B 必须显式告知用户进入了"agent 代理安装"模式，不得伪装成脚本结果。

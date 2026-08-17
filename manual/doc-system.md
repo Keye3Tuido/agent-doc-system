@@ -1,5 +1,5 @@
 ---
-schema_version: 5
+schema_version: 7
 ---
 
 # 文档体系操作手册（全局）
@@ -25,8 +25,7 @@ schema_version: 5
 │   └── main-module.md     项目主模块文档模板
 ├── skills/                各 doc-* skill 目录
 │   └── doc-*/SKILL.md
-└── scripts/               工具脚本
-    └── doc-*.py
+└── scripts/               工具脚本（清单见 §16；含 .py 与 .sh 两种）
 ```
 
 **项目** `<project>/.agent-docs/`（项目专属内容）：
@@ -40,6 +39,12 @@ schema_version: 5
         └── <repo-id>__<branch-slug>.md
         └── <repo-id>__<branch-slug>__<sub>.md
 ```
+
+**事实源划分**：
+
+- 文档自身的 yaml frontmatter 与正文是**唯一事实源**。
+- `_index.md` 中的「活跃子模块」「归档子模块」两张表是**派生视图**，不得手工维护。其 `文件` / `repo` / `branch` / `归档原因` 列取自各文档 frontmatter，`一句话定位` 列取自各文档 `## 定位` 章节首行。用 `python3 ~/.agent-docs/scripts/doc-tree.py <project_root> --emit-index-tables` 再生后替换对应两节。
+- `_index.md` 顶部的 `project_config` 不是派生视图，是项目耦合配置，仍需人工维护。
 
 **拷贝便利**：
 
@@ -93,7 +98,7 @@ schema_version: 5
 5. **运行脚本完成全量检测**（取代逐个手动 git 调用）：
    - `python3 ~/.agent-docs/scripts/doc-stale-check.py <project_root>` → 输出所有子模块的 stale 状态表
    - `python3 ~/.agent-docs/scripts/doc-encoding-check.py <project_root>` → 编码合规检查
-   - `python3 ~/.agent-docs/scripts/doc-format-check.py <project_root>` → yaml schema 与四元组重名检查
+   - `python3 ~/.agent-docs/scripts/doc-format-check.py <project_root>` → yaml schema 校验 + 四元组重名 + `repo` 可解析性 + §6/§8 内容硬约束（完整职责见 §16）
 6. 根据脚本输出汇总问题：STALE / NO_DOC / ORPHAN_DOC / ARCHIVED_BUT_ACTIVE / BRANCH_GONE / 编码问题 / schema 问题。
 7. **STALE 项内容判定**：对每个 STALE（sha 漂移）项，必须执行：
    - 取漂移范围内的提交摘要：在子模块目录内运行 `git log --oneline <doc_sha>..<remote_sha>`。
@@ -118,7 +123,7 @@ branch-slug = 分支名 slug（"/" → "-"）
 附属文档   = <repo-id>__<branch-slug>__<sub>.md
 ```
 
-slug 规则：保留字母、数字、CJK 字符（U+4E00-U+9FFF）、下划线和连字符，其他字符替换为 `-`，连续 `-` 合并为一个，首尾 `-` 去除。
+slug 规则：保留字母、数字、下划线、连字符，以及 CJK 统一表意文字（U+4E00–U+9FFF）与 CJK 扩展 A（U+3400–U+4DBF）；其他字符替换为 `-`，连续 `-` 合并为一个，首尾 `-` 去除。实现见 `doc-scaffold.py` 与 `doc-tree.py` 的 `slugify()`，两者必须与本规则一致。
 
 示例：
 
@@ -132,7 +137,7 @@ slug 规则：保留字母、数字、CJK 字符（U+4E00-U+9FFF）、下划线�
 - 同 owner+name 不同 origin → `origin-host-slug` 不同 → 不冲突。
 - 不同分支 → `branch-slug` 不同 → 不冲突。
 
-每对话扫描时若发现两个子模块文档元信息中四元组完全相同 → 立刻报 `> [doc-stale]`，要求合并到一份。
+每对话扫描时若发现两个子模块文档的四元组完全相同 → 立刻报 `> [doc-stale]`，要求合并到一份。四元组由 yaml 中的 `repo`（解析出 host / owner / name）与 `branch` 运行时推导，不存储于 yaml。
 
 ### 5.3 一个分支只保存一份文档
 
@@ -142,15 +147,31 @@ slug 规则：保留字母、数字、CJK 字符（U+4E00-U+9FFF）、下划线�
 
 ## 6. 写文档时的硬约束
 
-1. **所有文档强制使用 UTF-8 编码**，**不带 BOM**，行尾使用 `\n`（LF）。新建或修改文档前后都必须确认编码合规；发现非 UTF-8 / 含 BOM / 非 LF 行尾的文档立即在收尾 diff 中提议修复。
-1.5 **所有文本文件写入后必须立即运行 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底**。适用场景：`fs_write` 写入、脚本 `--out` 输出、Python `open(... "w")` 写入。即使声明了 `encoding="utf-8"`，中文 locale 下仍可能产生 GBK 输出。
-2. **不允许无意义换行**。一段话写在一行里，由编辑器/渲染器自然折行。仅在以下场景使用换行：段落分隔（空行）、列表项、标题前后、表格行、代码块、YAML 字段、引用块。**禁止为控制视觉宽度而在句中硬换行**。
-3. 单份文档 ≤ 500 行。超过则拆出附属文档（递归一层即可）。**拆分阈值（实操）**：单章 > 80 行或单文档 > 400 行 → 在 diff 提议中建议拆出附属文档；附属文档命名按 §5（`<repo-id>__<branch-slug>__<sub>.md`），`sub_section` 用语义 slug（`flow` / `data-flow` / `collaboration` / `change-scenarios` 等）。"_待生成_" 占位允许长期保留——空章节不算违规，但 doctor 应汇总占位章节统计供用户参考。
-4. 只描述**当前状态**。禁止"现在改成 X"、"修复了 Y bug"、"以前是 Z"等补丁式叙述。
-5. 不复制实现细节、不写行号、不写具体常数；常数只描述语义。
-6. 跨子模块**不引用文档**。需要时主动去对应仓库现读；找不到再评估是否要建/改文档。
-7. 主仓库内文件可直接引用，但引用处必须给"**何时需要查它**"的一句话指引。
-8. 所有文档必须严格遵循 §8「文档模板」与 §9「yaml schema」。
+1. **编码合规的唯一定义**：合法 UTF-8 + 无 BOM + 无 CRLF + 无孤立 CR。合法 UTF-8 内部的控制字符（换页 `\x0c`、ESC `\x1b` 等）**不视为问题**。本手册、`convert-to-utf8.sh`、`doc-encoding-check.py` 三处共用这一条定义，任何一处改动必须同步另两处。新建或修改文档前后都必须确认合规；发现不合规的文档立即在收尾 diff 中提议修复。
+2. **所有文本文件写入后必须立即运行 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底**（细则见 §6.1）。适用场景：`fs_write` 写入、脚本 `--out` 输出、Python `open(... "w")` 写入。即使声明了 `encoding="utf-8"`，中文 locale 下仍可能产生 GBK 输出。
+3. **不允许无意义换行**。一段话写在一行里，由编辑器/渲染器自然折行。仅在以下场景使用换行：段落分隔（空行）、列表项、标题前后、表格行、代码块、YAML 字段、引用块。**禁止为控制视觉宽度而在句中硬换行**。
+4. 单份文档 ≤ 500 行（**指正文行数，不含 yaml frontmatter**）。超过则拆出附属文档（递归一层即可）。**拆分阈值（实操）**：单章 > 80 行或单文档 > 400 行 → 在 diff 提议中建议拆出附属文档；附属文档命名按 §5（`<repo-id>__<branch-slug>__<sub>.md`），`<sub>` 用语义 slug（`flow` / `data-flow` / `collaboration` / `change-scenarios` 等），该 slug 只存在于文件名中，不写入 yaml。"_待生成_" 占位允许长期保留——空章节不算违规，但 doctor 应汇总占位章节统计供用户参考。
+5. 只描述**当前状态**。禁止"现在改成 X"、"修复了 Y bug"、"以前是 Z"等补丁式叙述。
+6. 不复制实现细节、不写行号、不写具体常数；常数只描述语义。
+7. 跨子模块**不引用文档**。需要时主动去对应仓库现读；找不到再评估是否要建/改文档。
+8. 主仓库内文件可直接引用，但引用处必须给"**何时需要查它**"的一句话指引。
+9. 所有文档必须严格遵循 §8「文档模板」与 §9「yaml schema」。
+
+> 上表第 **4、5、6、7** 条与 §8.7 的章节顺序**已由 `doc-format-check.py` 机器校验**，依次对应 `DOC_TOO_LONG` / `CHAPTER_TOO_LONG`、`PATCH_NARRATIVE`、`LINE_NUMBER_REF`、`CROSS_DOC_REF`，章节顺序对应 `CHAPTER_ORDER`。归档文档不受这些约束。凡新增此类约束，一律要求同时给出机器检查——只写进手册的规则在实践中不会被遵守。
+
+### 6.1 convert-to-utf8.sh 的行为契约
+
+**该脚本默认不推断编码**。它的定位是「我们刚写完文件后的兜底」，此时目标编码必然是 UTF-8，无需推断；而一旦推断就存在静默损坏风险——字节层面区分 GBK 中文与 EUC-KR 韩文需要语料统计，任何启发式都有失败面。历史上它用 `file --mime-encoding` 判编码，该命令把 GBK 判成 `iso-8859-1`，而 `iconv -f iso-8859-1` 对任意字节都"成功"，因此静默产出过不可逆乱码。
+
+| 模式 | 行为 |
+|---|---|
+| 默认 | 只修可确定的问题：BOM 剥离、CRLF → LF、孤立 CR → LF。**不做编码转换**；文件不是合法 UTF-8 时**拒绝改动**并非零退出，提示改用 `--from` |
+| `--from <enc>` | 显式指定源编码，确定性转换。这是唯一会转换编码的模式 |
+| `--guess` | opt-in 启发式。仅当拿到脚本区独占证据（谚文 / 假名密度）或只有唯一候选成立时才判定；多候选成立且结果不同 → 报 `AMBIGUOUS` 并拒绝改动 |
+
+**因此，任何地方都不得把本脚本描述为「自动检测并修复 GBK」**——默认模式遇到 GBK 只会拒绝改动。skill 中涉及兜底的措辞统一为：「默认模式修 BOM / CRLF / 孤立 CR；若文件不是合法 UTF-8 则拒绝改动并非零退出，此时必须重写该文件」。
+
+**退出码契约**：非零退出意味着"至少一个文件保持原样、需人工介入"，不代表"部分转换成功"。失败项一律未被改动。`/doc-sync-system` 的回滚判定必须**逐文件调用**本脚本并按单文件退出码决策——对目录整体调用时退出码是全目录累加的，一个无关文件判不出就会误触发整包回滚。
 
 ---
 
@@ -173,7 +194,7 @@ slug 规则：保留字母、数字、CJK 字符（U+4E00-U+9FFF）、下划线�
 
 > 总原则：文档与现状对不上即触发；对得上即不触发。
 
-**强不变量（structure 同步刷新）**：任何 `/doc-update` 流程涉及该模块文档变动时（无论 sha 漂移内容刷新、粒度补充扩写、还是 schema 升级补字段），必须重跑 `python3 ~/.agent-docs/scripts/doc-structure-import.py <doc> <module> <root>` 覆盖 `structure` 字段。**正文改 + structure 未刷 = doctor 视为不一致警告**。
+> schema v7 起不再有 `structure` 字段，因此也不再有「structure 同步刷新」这条强不变量。文档的结构信息一律写在正文的「架构」「接口」「数据契约」「依赖」等章节里，由人/agent 依据实际源码撰写。
 
 ---
 
@@ -181,7 +202,7 @@ slug 规则：保留字母、数字、CJK 字符（U+4E00-U+9FFF）、下划线�
 
 **主模块、子模块、附属文档统一使用以下模板**。附属文档可省略不相关章节，但章节顺序不得调整。
 
-> 本节定义了**主模块的 4 个新章节**（§8.1-§8.4，仅主模块文档使用）和**子模块的 2 个新章节**（§8.5-§8.6，仅子模块文档使用）。
+> 章节构成：**通用 14 章**（§8.0，主模块与子模块共用）+ **主模块专属 4 章**（§8.1–§8.4）或 **子模块专属 2 章**（§8.5–§8.6）。因此主模块文档共 18 章、子模块文档共 16 章，顺序见 §8.7。
 
 ### 8.0 通用 14 章（主 + 子模块共用）
 
@@ -282,30 +303,59 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `schema_version` | 是 | 当前版本，见本文件 yaml 头 |
-| `agent_load` | 是 | `always`（主模块、_index）/ `on-demand`（子模块）/ `manual`（模板） |
-| `repo` | 是 | origin URL 原值（不做 slug） |
-| `origin_host` | 是 | 例 `github.com` |
-| `owner` | 是 | 例 `foo` |
-| `name` | 是 | 例 `Bar` |
-| `branch` | 是 | 例 `release/2026-q2` |
+| `repo` | 是 | origin URL 原值（不做 slug）。`origin_host` / `owner` / `name` 由本字段运行时解析得出，不再存储 |
+| `branch` | 是 | 例 `release/2026-q2`。文件名中的 branch-slug 已做 `/`→`-` 替换且不可逆，故本字段保留原值 |
 | `commit` | 是 | 40 位 sha，从 `origin/<branch>` 取 |
 | `archived` | 否 | `true` 表示归档 |
 | `archived_at` | 否 | ISO 日期 |
 | `archived_reason` | 否 | `removed-from-gitmodules` / `renamed-to-X` / `merged-into-Y` / `imported-from-other-project` |
 | `origin_path_in_main` | 否 | 该子模块在主仓库中的挂载路径，例如 `Libraries/Bar` |
 | `merged_from` | 否 | `[<branch-slug>, ...]` |
-| `sub_section` | 否 | 仅附属文档使用，纯语义 slug |
-| `structure.deps` | 否 | 依赖列表，每项：`m`（模块路径或包名）、`use`（top-N 高频使用符号）、`type`（import/include/use）、`role`（`framework`/`utility`/`sibling`/`resource`/`unknown`）、`granularity`（`file` 兼容老数据；新提取产出 `module`） |
-| `structure.exports` | 否 | 导出列表，每项：`n`（符号名）、`t`（class/function/interface/type/const/struct/enum/trait）、`path`（文件路径）、`vis`（`public`/`protected`/`internal`，默认 `public`）、`base`（直接基类，可选） |
-| `structure.cross_module_contracts` | 否 | 跨模块协作契约，每项：`with`（目标模块）、`protocol`（`delegate`/`callback`/`event`/`message`/`rpc`/`inherit`/`ecs`/`di`/`observer-bus`/`state-machine`）、`interface`（接口名）、`direction`（`inbound`/`outbound`/`bidirectional`）、`note` |
 
-**以上为全部允许字段**。文档 yaml frontmatter 中**不得出现**上表未列出的顶层键。doc-update 升级时按此表裁剪；doc-doctor 检查时按此表校验。
+**以上为全部允许字段**。文档 yaml frontmatter 中**不得出现**上表未列出的顶层键；`doc-update` 升级时按此表裁剪，`doc-doctor` 检查时按此表校验。v7 起 frontmatter 只承载「这份文档是谁的、写于哪个 sha、是否归档」，不承载任何从源码提取的结构数据。
 
-**升级策略**：
+**为什么 4 个必填字段不能再精简**（已核算，勿重复推翻）：
 
-- 字段扩展（`vis` / `base` / `cross_module_contracts`）→ optional，老文档零成本兼容
-- `deps` 语义从"文件路径"改为"模块路径"通过 `granularity: file|module` 字段判别
-- 老文档升级时对照上表裁剪多余字段，保持文档瘦身
+| 字段 | 不可移除的原因 |
+|---|---|
+| `commit` | 唯一的 staleness 基准，且必须留在文档内。若上移到 `_index.md`，每次 sha 漂移都要改同一个文件，把高频写入集中到单点，跨分支必然冲突——这与本节及 `_index.md` 中「日常 sha 漂移不触发索引修改」的设计相悖 |
+| `repo` | 文件名的 slug 有损且存在碰撞（`gitee.com` 与 `gitee-com` 同为 `gitee-com`），无法还原原始 URL。子模块从 `.gitmodules` 移除后（归档场景）也无从反查 |
+| `branch` | 同为有损 slug（`release/2026-q2`、`release-2026-q2`、`release-2026/q2` 三者 slug 全等），无法还原；而 `origin/<branch>` 解析需要原值 |
+| `schema_version` | 逐份文档的迁移判定依据。移除后无法识别混合版本状态，`OUTDATED_SCHEMA_VERSION` 检测失效 |
+
+**升级策略**：老文档升级时对照上表裁剪多余字段，保持文档瘦身。
+
+**v6 → v7 变更**：移除 `structure` 字段及其全部子字段，并删除配套的两个结构提取脚本。
+
+| 移除字段 | 依据 | 替代来源 |
+|---|---|---|
+| `structure` | 占文档体积 98% 而信号极低，且反转了自身的省 token 初衷 | 正文的「架构」「接口」「数据契约」「依赖」章节 |
+
+移除依据（实测数据，非推测）：
+
+| 现象 | 实测值 |
+|---|---|
+| 占文档体积 | 两个真实项目各 29 份文档，frontmatter 53860 行 / 正文 1182 行 → **98%** |
+| deps 的 role 判定质量 | 148/149 为 `unknown` |
+| deps 的 use（高频符号） | 0/149 非空 |
+| 跨模块契约条目数 | 150 个源文件的模块上为 0 项 |
+| granularity 字段 | 声称 `module`，实际值是裸头文件名 |
+
+更关键的是它反转了自身的设计初衷：`doc-context` 的两步加载本意是「只读 frontmatter 拿索引、不读正文」以省 token，而实测单份文档 frontmatter 最多 8761 行、正文 48 行——只读 frontmatter 比读正文贵约 180 倍。
+
+`exports` 是其中唯一有真实信号的部分（真实 C++ 模块可提取 173 个类型正确的符号），随本次移除一并失去。若后续要恢复，应作为**侧车文件**而非 frontmatter，并且必须先解决 role / use / 跨模块契约三项的提取质量。两个脚本的实现可从 git 历史取回。
+
+副作用：移除后 Python 脚本均只依赖 Python 3 标准库，`tree-sitter` 依赖彻底消失；整套工具的运行时依赖为 Python 3、git CLI，以及 `convert-to-utf8.sh` 所需的 Bash 与常见系统命令。
+
+**v5 → v6 变更**：移除 5 个字段，必填项由 8 个降为 4 个。移除依据统一为「可从别处精确推导」或「无任何消费者且不承载不可推导的信息」。
+
+| 移除字段 | 依据 | 替代来源 |
+|---|---|---|
+| `agent_load` | 无任何脚本或 skill 消费；取值完全由文档类型决定 | 无需替代 |
+| `origin_host` / `owner` / `name` | 可从 `repo` 精确解析 | `doc-scaffold.py` / `doc-format-check.py` 的 `parse_git_url()` |
+| `sub_section` | 文件名 `__<sub>` 后缀已承载同一信息 | 文件名后缀 |
+
+存量 v5 文档由 `doc-format-check.py` 报 `OUTDATED_SCHEMA_VERSION` 与 `DEPRECATED_FIELD(<字段名>)`，按本节首段「只提示不自动重写」处理，等用户批准后批量裁剪。
 
 ---
 
@@ -321,7 +371,7 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 > 归档文档留在 `modules/` 目录不移动，仅通过 yaml 字段 `archived: true` 区分。`doc-tree.py` 和 `doc-format-check.py` 脚本会自动识别归档文档并分类展示。
 
-**恢复**：扫描时若 `(origin_host, owner, name, branch)` 四元组在已归档文档中精确命中 → 提议去掉 `archived: *` 字段，刷新 `commit`。未命中视为新增子模块；可在 diff 提议中提示"是否参考某 archived 文档"，但不主动复用内容，由用户决定。
+**恢复**：扫描时若 `(host, owner, name, branch)` 四元组（由 `repo` + `branch` 推导）在已归档文档中精确命中 → 提议去掉 `archived: *` 字段，刷新 `commit`。未命中视为新增子模块；可在 diff 提议中提示"是否参考某 archived 文档"，但不主动复用内容，由用户决定。
 
 **分支合并归档**：扫描时若 `branch_A` 是 `branch_B` 的祖先（`git merge-base --is-ancestor`），且两份文档同时存在 → 提议在 A 文档元信息加 `archived: true` + `archived_reason: merged-into-<branch_B>`，并在 B 文档元信息追加 `merged_from: [<branch_A>]`。
 
@@ -355,7 +405,9 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 ## 13. 首次落地两阶段
 
-仅当项目 `_index.md` 顶部 `project_config.initial_bootstrap_done == false` 时执行本节流程；落地完成后由用户把该字段改为 `true`，后续 skill 启动时跳过本节。
+仅当项目 `_index.md` 顶部 `project_config.initial_bootstrap_done == false` 时执行本节流程；该字段翻为 `true` 后，后续 skill 启动时跳过本节。
+
+**谁来翻这个字段**：由 agent 在第二阶段收尾的那份 diff 里提议改为 `true`，与其他改动一同经用户审批落盘——**不是**由用户手工编辑，也**不是**agent 绕过审批直接写。翻转的前置条件见下方第二阶段末条。
 
 第一阶段（轻）：
 
@@ -368,7 +420,11 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 - 按用户确认的清单逐个深入扫源码。
 - 通过 §11 的 diff 提议格式，按"一份文档一块"逐份输出，等用户批准后写入 `.agent-docs/doc-library/modules/`。
 - 同步刷新 `_index.md` 的子模块清单与 `doc-library/main-module.md`。
-- 全部完成且文档对齐项目现状后，agent 自动在最后一份 diff 中将 `_index.md` 的 `project_config.initial_bootstrap_done` 改为 `true`。
+- 翻转 `initial_bootstrap_done`：当以下条件**全部**满足时，在最后一份 diff 中将 `_index.md` 的 `project_config.initial_bootstrap_done` 改为 `true`（仍需用户审批该 diff）：
+  - `.gitmodules` 中每个子模块都已有对应文档；
+  - 每份活跃子模块文档的 `## 定位` 与 `## 职责边界` 均有实质内容（非 `_待生成_`、非空）；
+  - `doc-library/main-module.md` 的 `## 定位` 有实质内容。
+  条件不满足则不翻，留待后续 `/doc-update` 完成后再翻。
 
 ---
 
@@ -394,13 +450,13 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 | 触发词 | 用途 | 对应章节 |
 |---|---|---|
-| `/doc-context` | 业务对话中加载项目文档库作为上下文（只读，不出 diff） | §3 §9 |
+| `/doc-context` | 业务对话中加载项目文档库作为上下文（只读，不出 diff） | §0 §8 |
 | `/doc-init` | 在不存在文档库时初始化、建立文档库 | §13 §14 |
 | `/doc-update` | 更新文档（指定子模块或所有 stale 项），改动前必须出 diff 等用户审批 | §4 §7 §8 §11 |
 | `/doc-rebuild` | 全量重建文档库，先列清单等确认 | §13 |
 | `/doc-doctor` | 检查 + 整理 + 归档（修复编码、归档已离场子模块、合并重名等），先列清单等确认；不删文件 | §4 §5 §6 §10 §11 |
 | `/doc-prune` | 物理删除孤儿归档 / 残破归档，先列清单等确认 | §10 |
-| `/doc-tree` | 只读输出当前文档库结构清单 | §3 §9 |
+| `/doc-tree` | 只读输出当前文档库结构清单 | §0 §9 |
 | `/doc-merge` | 跨项目合并文档库（章节级智能合并 + 实际项目验证） | §5 §6 §10 §11 |
 | `/doc-sync-system` | 从远程拉取最新 skill 包并安装（备份 → dry-run → 用户确认 → 覆写）；脚本失败时由 agent 代理 | §15 §16 |
 
@@ -422,26 +478,29 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 ## 16. 工具脚本
 
-所有重复性检测逻辑下沉为脚本，位于 `~/.agent-docs/scripts/`。大部分脚本无第三方依赖（仅 Python 3 标准库 + git CLI），`doc-structure-extract.py` 需要 tree-sitter（见虚拟环境 `~/.agent-docs-venv`）。
+所有重复性检测逻辑下沉为脚本，位于 `~/.agent-docs/scripts/`。
+
+**依赖面**：Python 脚本只用 Python 3 标准库与 git CLI，可直接用系统 `python3` 运行；`convert-to-utf8.sh` 另需 Bash 及 `find` / `mktemp` / `cat` 等常见系统命令。无虚拟环境、无第三方 Python 包、无需额外安装步骤。
+
+**回归测试随包分发**：`selftest.py` 与 `doc-lint-consistency.py` 都进 git、都随 `/doc-sync-system` 下发并安装到 `~/.agent-docs/scripts/`。前者是本体系的回归自检，后者检查体系自身的引用一致性；改动本体系（手册 / skill / 脚本任一处）后都应把两者跑一遍再提交。
 
 | 脚本 | 用途 | 典型调用 |
 |---|---|---|
 | `doc-stale-check.py` | 一次性输出所有子模块 stale 状态表 | `python3 ~/.agent-docs/scripts/doc-stale-check.py <project_root>` |
-| `doc-encoding-check.py` | 编码合规检查（UTF-8/BOM/CRLF） | `python3 ~/.agent-docs/scripts/doc-encoding-check.py <project_root>` |
-| `doc-format-check.py` | yaml schema 校验 + 四元组重名 + 路径存在性 | `python3 ~/.agent-docs/scripts/doc-format-check.py <project_root>` |
-| `doc-structure-extract.py` | 从源码提取结构化关系数据（deps/exports），支持 Python/JS/TS/Go/Java/Rust/C/C++ | `~/.agent-docs-venv/bin/python3 ~/.agent-docs/scripts/doc-structure-extract.py <module_path> <project_root>` |
-| `doc-structure-import.py` | 调用 `doc-structure-extract.py` 并将结果直接写入文档的 `structure` 字段 | `python3 ~/.agent-docs/scripts/doc-structure-import.py <doc_path> <module_path> <project_root>` |
-| `doc-tree.py` | 输出文档库结构树（活跃/归档/缺失） | `python3 ~/.agent-docs/scripts/doc-tree.py <project_root>` |
-| `convert-to-utf8.sh` | 把文件或目录下文本文件转换为严格 UTF-8（无 BOM / LF） | `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 原地修复 |
+| `doc-encoding-check.py` | 只读检查编码合规，判据同 §6 第 1 条（UTF-8 / BOM / CRLF / 孤立 CR） | `python3 ~/.agent-docs/scripts/doc-encoding-check.py <project_root>` |
+| `doc-format-check.py` | yaml schema 白名单校验 + 四元组重名 + `repo` 可解析性 + **§6/§8 内容硬约束**（行数预算 / 补丁式叙述 / 行号引用 / 跨子模块引用 / 章节顺序）。扫描范围含 `doc-library/modules/` **以及** `_index.md` 与 `doc-library/main-module.md` | `python3 ~/.agent-docs/scripts/doc-format-check.py <project_root>` |
+| `doc-lint-consistency.py` | 体系自身的引用层一致性检查：手册章节号、脚本名与 flag、状态码、schema 字段、硬编码版本号、`~` 路径、skill 登记、步骤编号、禁用措辞、模板引用 | `python3 ~/.agent-docs/scripts/doc-lint-consistency.py [package_root]` |
+| `selftest.py` | 本体系回归自检：编码判定 / URL 解析 / schema 校验 / 内容硬约束 / 派生表同构 / lint 自身 | `python3 ~/.agent-docs/scripts/selftest.py` |
+| `doc-tree.py` | 输出文档库结构树（活跃/归档/缺失）；`--emit-index-tables` 再生 `_index.md` 两张派生表 | `python3 ~/.agent-docs/scripts/doc-tree.py <project_root> [--emit-index-tables]` |
+| `convert-to-utf8.sh` | 把文本文件规范化为合规编码（判据同 §6 第 1 条），原地写回保留 inode。**默认不做编码转换**，三种模式与退出码契约见 §6.1 | `bash ~/.agent-docs/scripts/convert-to-utf8.sh [--from <enc>\|--guess] <path>` |
 | `doc-diff.py` | 从旧文件和新文件生成 unified diff | `python3 ~/.agent-docs/scripts/doc-diff.py --old <old> --new <new> [--out <out>]` |
 | `doc-scaffold.py` | 从子模块路径生成文档骨架（yaml 头 + 空章节） | `python3 ~/.agent-docs/scripts/doc-scaffold.py <module_path> <project_root>` |
-| `doc-sync-system.py` | 下载远程 skill 包并安装（备份 → dry-run → 写入） | `python3 ~/.agent-docs/scripts/doc-sync-system.py [--url <url>] [--dry-run] [--no-backup]` |
+| `doc-sync-system.py` | 下载远程 skill 包并安装（备份 → dry-run → 覆写；仅按显式 `OBSOLETE_PATHS` 清理废弃文件） | `python3 ~/.agent-docs/scripts/doc-sync-system.py [--url <url>] [--dry-run] [--no-backup]` |
 
 ### 16.1 agent 使用规则
 
 - §4 的全量检测**必须通过脚本完成**，禁止逐个手动执行 git 命令。
 - 新建文档时**优先使用 `doc-scaffold.py`** 生成骨架，再补充语义内容。
-- **所有文本写入的统一模式**：(1) 写入（`fs_write` / 脚本 `--out` / Python `open`）；(2) 立即 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>`。已知 bug：`fs_write` 及部分 Python 实现在中文系统将 UTF-8 误存为 GBK，仅靠 `encoding="utf-8"` 不足以防御。
-- 写入文档后立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 确保 UTF-8 合规。
+- **所有文本写入的统一模式**：(1) 写入（`fs_write` / 脚本 `--out` / Python `open`）；(2) 立即 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>`。已知 bug：`fs_write` 及部分 Python 实现在中文系统将 UTF-8 误存为 GBK，仅靠 `encoding="utf-8"` 不足以防御。若该脚本以非零退出报「编码无法判定」，说明写出的**不是**合法 UTF-8：必须重写该文件，不得忽略、也不要改用 `--guess` 蒙。
 - `/doc-tree` skill 直接调用 `doc-tree.py` 输出结果。
 - **diff 提议必须写入文件**（直接用 `fs_write` 写 `pending-review.md` + `convert-to-utf8.sh` 转码），禁止将大段 diff 逐字输出到对话框。对话中只需告知用户文件路径并等待确认。

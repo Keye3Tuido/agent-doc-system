@@ -3,7 +3,7 @@ name: doc-context
 description: "Load project documentation library as context before answering questions about code structure, module boundaries, submodule functionality, cross-module calls, architecture, bug investigation, or new feature design. Call this skill whenever the user's request requires understanding the project's documented structure."
 ---
 
-> 本 skill 是轻量上下文加载器，不做文档管理，无需读取全局手册。
+> 本 skill 是轻量上下文加载器，只读不写、不做文档管理，因此**不需要加载全局手册**。下文出现的 `§n` 仅作为「规则出处」备注，供人工追溯，执行时无需为此去读手册。
 
 ## 执行步骤
 
@@ -20,7 +20,7 @@ description: "Load project documentation library as context before answering que
 
 3. 自动识别当前会话关联的子模块并加载对应文档：
    - 从 IDE 环境上下文中获取当前打开的文件列表（active editor file、open editor files）。
-   - 将每个打开文件的路径与 `_index.md` 活跃子模块表中的 `repo` 路径做前缀匹配，确定其所属子模块。
+   - 把每个打开文件的项目内相对路径，与各子模块文档 frontmatter 的 `origin_path_in_main`（该子模块在主仓库中的挂载路径，如 `Libraries/Bar`）做前缀匹配，确定其所属子模块。**不要用活跃表的 `repo` 列做匹配** —— 那一列是 origin URL，不是文件路径。若某文档缺 `origin_path_in_main`，回退到用 `.gitmodules` 的 `path` 字段配对。
    - 对所有匹配到的子模块，自动读取对应文档：
      ```
      Read <project_root>/.agent-docs/doc-library/modules/<matched-slug>.md
@@ -29,14 +29,12 @@ description: "Load project documentation library as context before answering que
 
 4. 根据用户问题中**额外**提到的路径、模块名或子模块 slug（步骤 3 未覆盖的），补充读取相关子模块文档。
 
-5. **两步加载策略**（节省 token，特别是 `cross_module_contracts` 较大时）：
+5. **按需加载**：
 
-   - 第一步：仅加载文档的 yaml frontmatter（含 `structure` 字段）作为快速索引。文件 `Read` 时只读到首个 `---` 闭合行即可。
-   - 第二步：根据用户问题语义判定是否需要正文：
-     - 问"接口/数据结构/依赖/导出符号"等结构化问题 → `structure.exports` / `deps` 即可回答，**跳过正文 Read**。
-     - 问"流程/职责/警示/协作关系"等叙述性问题 → 加载正文。
-   - 跨模块查询（如"改 A 影响谁"）：先读 A 文档的 `structure.deps[].m` 与 `cross_module_contracts[].with`，反向索引到下游模块；再按需加载下游文档。
-   - 此策略仅在大型项目（≥ 30 子模块）或用户问题明显是结构化查询时启用；小项目可直接全量 Read。
+   - schema v7 起 frontmatter 只有 `repo` / `branch` / `commit` 等身份字段，**不再有结构化索引**，因此不存在「只读 frontmatter 就能回答结构问题」的快捷路径——要答内容就得读正文。
+   - 大型项目（≥ 30 子模块）控制读取量的办法是**收窄文档范围**而非收窄单份文档的读取深度：先用 `_index.md` 的活跃子模块表按「一句话定位」筛出相关模块，只读这几份的正文。
+   - 跨模块查询（如"改 A 影响谁"）：读 A 文档的 `## 依赖`、`## 协作关系`、以及主模块文档的 `## 跨模块数据流` / `## 模块协同模式` 章节，据此反向定位下游模块，再按需加载。
+   - 单份文档正文上限 500 行（出处：手册 §6 第 4 条），因此全量读取单份文档的代价可控。
 
 6. 将加载的文档内容融入对用户问题的回答。
 

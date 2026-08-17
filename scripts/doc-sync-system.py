@@ -13,8 +13,9 @@ Behavior:
 3. Backs up current ~/.agent-docs/{skills,scripts,manual} to
    ~/.agent-docs/.backup/<timestamp>/ unless --no-backup.
 4. Copies new files into the corresponding ~/.agent-docs subdirectories
-   (file-level overwrite; existing files NOT in the package are left alone).
-5. Prints a summary: ADDED / REPLACED / UNCHANGED counts and file lists.
+   (file-level overwrite; unrelated existing files are left alone).
+5. Removes only paths in the explicit OBSOLETE_PATHS migration list.
+6. Prints a summary: ADDED / REPLACED / REMOVED / UNCHANGED counts and file lists.
 
 Safety:
 - Aborts before writing if the zip structure does not contain at least one
@@ -41,6 +42,10 @@ import zipfile
 
 AGENT_DOCS_HOME = os.path.expanduser("~/.agent-docs")
 TARGETS = ("manual", "scripts", "skills", "templates", "installers", "urls.conf", "README.md")
+OBSOLETE_PATHS = (
+    "scripts/doc-structure-extract.py",
+    "scripts/doc-structure-import.py",
+)
 DOWNLOAD_TIMEOUT_SEC = 60
 
 
@@ -142,6 +147,21 @@ def collect_changes(src_root):
     return added, replaced, unchanged
 
 
+def collect_obsolete(src_root):
+    """Return installed files explicitly retired by this package version.
+
+    The source-absence guard prevents a stale tombstone from deleting a path if a
+    future release intentionally restores it.
+    """
+    removed = []
+    for rel in OBSOLETE_PATHS:
+        src = os.path.join(src_root, rel)
+        dst = os.path.join(AGENT_DOCS_HOME, rel)
+        if not os.path.exists(src) and os.path.isfile(dst):
+            removed.append(dst)
+    return removed
+
+
 def make_backup():
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_root = os.path.join(AGENT_DOCS_HOME, ".backup", ts)
@@ -161,12 +181,17 @@ def apply_changes(changes):
         shutil.copy2(sp, dp)
 
 
+def apply_removals(paths):
+    for path in paths:
+        os.remove(path)
+
+
 def _format_path(target, rel):
     """Render path entry: single-file target (rel is empty) → just target name; else target/rel."""
     return target if not rel else f"{target}/{rel}"
 
 
-def print_summary(label, added, replaced, unchanged):
+def print_summary(label, added, replaced, removed, unchanged):
     print(f"\n=== {label} ===")
     print(f"ADDED:     {len(added)}")
     for t, rel, _, _ in sorted(added):
@@ -174,6 +199,9 @@ def print_summary(label, added, replaced, unchanged):
     print(f"REPLACED:  {len(replaced)}")
     for t, rel, _, _ in sorted(replaced):
         print(f"  ~ {_format_path(t, rel)}")
+    print(f"REMOVED:   {len(removed)}")
+    for path in sorted(removed):
+        print(f"  - {os.path.relpath(path, AGENT_DOCS_HOME)}")
     print(f"UNCHANGED: {len(unchanged)}")
 
 
@@ -212,13 +240,14 @@ def main():
         src_root = os.path.join(tmp, prefix.rstrip("/")) if prefix else tmp
 
         added, replaced, unchanged = collect_changes(src_root)
+        removed = collect_obsolete(src_root)
 
         if args.dry_run:
-            print_summary("DRY RUN (no changes written)", added, replaced, unchanged)
+            print_summary("DRY RUN (no changes written)", added, replaced, removed, unchanged)
             return 0
 
-        if not added and not replaced:
-            print_summary("NO CHANGES NEEDED", added, replaced, unchanged)
+        if not added and not replaced and not removed:
+            print_summary("NO CHANGES NEEDED", added, replaced, removed, unchanged)
             return 0
 
         backup_root = None
@@ -233,6 +262,7 @@ def main():
         try:
             apply_changes(added)
             apply_changes(replaced)
+            apply_removals(removed)
         except Exception as e:
             print(f"[error] install failed: {e}", file=sys.stderr)
             if backup_root:
@@ -240,7 +270,7 @@ def main():
                       file=sys.stderr)
             return 4
 
-        print_summary("INSTALLED", added, replaced, unchanged)
+        print_summary("INSTALLED", added, replaced, removed, unchanged)
         if backup_root:
             print(f"\nBackup: {backup_root}")
     return 0

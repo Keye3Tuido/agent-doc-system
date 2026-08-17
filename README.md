@@ -21,7 +21,7 @@ python3 agent-doc-system/installers/install-global.py
 全局安装完成后，需要将 skill 注册到各 IDE。根据 IDE 是否支持软链接，有两种安装方式：
 
 - **软链接（symlink）**：IDE 目录下的 skill 文件指向 `~/.agent-docs/skills/`，升级时只需更新全局目录即可自动生效。适用于支持软链接的 IDE。
-- **复制（copy）**：将 skill 文件完整复制到 IDE 目录下。适用于不支持软链接的 IDE（如 Kiro IDE）。升级后需额外同步 IDE 目录。
+- **复制（copy）**：将 skill 文件完整复制到 IDE 目录下。适用于不支持软链接的 IDE。升级后需额外同步 IDE 目录。
 
 > **由 agent 执行安装时**：agent 应询问用户选择哪种方式（symlink / copy），或根据目标 IDE 的已知限制自动选择。若用户无明确偏好，按下方各 IDE 的推荐方式执行。
 
@@ -39,19 +39,21 @@ done
 
 #### Kiro IDE
 
-推荐方式：**复制**（Kiro 不支持软链接形式的 skill 目录）
+推荐方式：**软链接**（Kiro 已支持软链接形式的 skill 目录，`~/.kiro/skills/` 下的符号链接会被正常发现并加载）
+
+```bash
+for skill in ~/.agent-docs/skills/*/; do
+  ln -sfn "${skill%/}" ~/.kiro/skills/$(basename "$skill")
+done
+```
+
+> `-n` 不可省略：目标已是「指向目录的软链接」时，`ln -sf` 会跟随该链接、把新链接建到目标目录内部；`-n` 才会直接替换链接本身。
+
+如需与全局目录解耦，也可改用复制（升级后须额外同步）：
 
 ```bash
 for skill in ~/.agent-docs/skills/*/; do
   cp -R "$skill" ~/.kiro/skills/$(basename "$skill")
-done
-```
-
-或使用软链接（如果未来 Kiro 支持）：
-
-```bash
-for skill in ~/.agent-docs/skills/*/; do
-  ln -sf "$skill" ~/.kiro/skills/$(basename "$skill")
 done
 ```
 
@@ -109,8 +111,8 @@ done
 
 1. 下载最新版本并更新全局 `~/.agent-docs/`（备份 → dry-run → 用户确认 → 覆写）
 2. 同步当前 IDE 的 skill 目录：
-   - **软链接方式**（如 Claude Code、DeepSeek、Cursor、VSCode/Copilot）：无需额外操作，自动生效。
-   - **复制方式**（如 Kiro、Cursor）：检测变更并提示用户确认后覆盖更新。
+   - **软链接方式**（如 Claude Code、Kiro、DeepSeek、Cursor、VSCode/Copilot）：无需额外操作，自动生效。
+   - **复制方式**：检测变更并提示用户确认后覆盖更新。
 
 ### 方式二：手动运行脚本
 
@@ -144,7 +146,7 @@ agent-doc-system/
 ├── scripts/                 # 10 个工具脚本
 ├── skills/                  # 9 个 doc-* skill
 ├── installers/install-global.py
-└── templates/               # _index.md, main-module.md（schema v5）
+└── templates/               # _index.md, main-module.md（schema v7）
 ```
 
 安装后 → `~/.agent-docs/`；项目文档库 → `<project>/.agent-docs/`。

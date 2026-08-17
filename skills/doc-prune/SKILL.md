@@ -12,7 +12,7 @@ description: "Permanently delete unused or orphaned documentation files in the p
    python3 ~/.agent-docs/scripts/doc-stale-check.py <project_root>
    python3 ~/.agent-docs/scripts/doc-format-check.py <project_root>
    ```
-2. 从脚本输出中识别候选删除项（均在 `doc-library/modules/` 中）：
+2. 从脚本输出中识别候选删除项（均在 `doc-library/modules/` 中）。信号来源：`ORPHAN_DOC` 由 `doc-stale-check.py` 给出，归档字段完整性与 `UNPARSEABLE_REPO_URL` 由 `doc-format-check.py` 给出。
    - `ORPHAN_DOC` 且 `archived: true`：四元组与任何已知仓库都对不上、且无 `merged_from` 链 → 候选"孤儿归档文档"。
    - `archived: true` 且元信息字段不全（缺 `archived_at` 或 `archived_reason`）→ 候选"残破归档文档"。
 3. 非归档的 `ORPHAN_DOC`（应归档但未标记）**只列不删**，提示用户先用 `/doc-doctor` 走归档流程。
@@ -28,4 +28,5 @@ description: "Permanently delete unused or orphaned documentation files in the p
 - 不接受 "yes" 之外的批准词。
 - 拒绝在用户没有明确清单时执行批量删除。
 - 非归档文档**永不在本指令删除**，强制走 `/doc-doctor` 先归档。
+- **身份不可解析者禁止进入删除候选**：若 `doc-format-check.py` 对某文档报 `UNPARSEABLE_REPO_URL`，说明其 `repo` 无法解析出可比对的四元组，「与任何已知仓库都对不上」这一判断对它不成立。此类文档只列出并提示用户先修正 `repo` 字段，**不得**列为删除候选。
 - 全程 UTF-8 / 不带 BOM / LF 行尾。

@@ -4,7 +4,11 @@ doc-encoding-check.py - Check encoding compliance of all .md files.
 
 Usage: python3 ~/.agent-docs/scripts/doc-encoding-check.py [project_root]
 
-Checks: UTF-8, no BOM, LF line endings (no CRLF).
+Checks: UTF-8, no BOM, LF line endings (no CRLF, no lone CR).
+
+"Compliant" here is exactly what convert-to-utf8.sh enforces, and the manual
+(section 6, rule 1) states the same definition. Control characters inside
+otherwise-valid UTF-8 (form feed, ESC, ...) are NOT treated as issues.
 Output: one issue per line, or "ALL_PASS" if clean.
 """
 
@@ -29,6 +33,11 @@ def check_file(filepath, relpath):
     if b"\r\n" in data:
         crlf_count = data.count(b"\r\n")
         issues.append(f"{relpath}: CRLF_DETECTED (count={crlf_count})")
+
+    # A lone CR (not part of a CRLF pair) also violates the LF-only requirement.
+    lone_cr = data.replace(b"\r\n", b"").count(b"\r")
+    if lone_cr:
+        issues.append(f"{relpath}: LONE_CR_DETECTED (count={lone_cr})")
 
     return issues
 

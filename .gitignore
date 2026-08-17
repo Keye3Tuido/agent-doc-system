@@ -1,0 +1,6 @@
+# TV 流程的会话产物（规则文件、review 报告），不属项目内容
+.tv/
+
+# Python 运行产物
+__pycache__/
+*.pyc

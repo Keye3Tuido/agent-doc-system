@@ -21,9 +21,9 @@ description: "Merge documentation libraries from one or more other projects into
 
 ### 阶段 1：扫描 + 候选分类
 
-**主键定义**：以 yaml 头部 `(origin_host, owner, name, branch)` 四元组作为唯一主键。文件名当作衍生（按 §5.1 推算）。同一四元组在不同项目中文件名可能不一致，以当前项目的标准命名为准。
+**主键定义**：以 `(host, owner, name, branch)` 四元组作为唯一主键，其中 host / owner / name 由 yaml 的 `repo` 字段运行时解析得出（不单独存储，见 §9），branch 取 yaml 的 `branch` 字段。文件名当作衍生（按 §5.1 推算）。同一四元组在不同项目中文件名可能不一致，以当前项目的标准命名为准。若某副本被 `doc-format-check.py` 报 `UNPARSEABLE_REPO_URL`，其四元组不可比对，**不得参与主键匹配**，只列出并提示用户先修 `repo`。
 
-**附属文档**：`<repo-id>__<branch-slug>__<sub>.md` 与主文档同主键 + `sub_section` 字段，合并规则与主文档一致。
+**附属文档**：`<repo-id>__<branch-slug>__<sub>.md` 与主文档同主键，靠文件名的 `__<sub>` 后缀区分（`<sub>` 只存在于文件名中，不写入 yaml，见 §6 第 4 条），合并规则与主文档一致。
 
 对每个外部路径，扫 `doc-library/modules/`（包括所有 `.md`，不区分 archived），按主键与当前项目对比，得到四类候选：
 
@@ -64,15 +64,15 @@ description: "Merge documentation libraries from one or more other projects into
 - 「框架总览」（主模块）：验依据 = 分层目录 + `.gitmodules` 实际结构；不一致丢弃
 - 「业务主循环」（主模块）：验依据 = 入口类的初始化 / 主循环代码
 - 「跨模块数据流」（主模块）：验依据 = 实际跨模块数据持有者（代码中跨子模块共享的数据结构）
-- 「模块协同模式」（主模块）：验依据 = `cross_module_contracts` 实际识别结果
-- 「协作关系」（子模块）：验依据 = `cross_module_contracts` 字段；不一致丢弃
+- 「模块协同模式」（主模块）：验依据 = 当前项目源码中实际存在的 delegate / callback / event / 消息协议调用点
+- 「协作关系」（子模块）：验依据 = 当前项目源码中实际的出入向调用；对不上则丢弃
 - 「典型修改场景」（子模块）：**经验类章节，不做实际项目验证**，按"信息密度更高且不与现状矛盾"取舍；都为空保留 `_待生成_`
 
 **yaml 头部处理**：
 
 - 保留当前项目原有 yaml 字段。
 - `commit` 字段**重读当前项目对应子模块的远端 sha**（`git -C <module> rev-parse origin/<branch>`），不沿用旧值。
-- `structure` 字段**重新从当前项目源码提取**（执行与 doc-update 相同的提取逻辑），不沿用外部副本的 structure 数据。
+- 外部副本若带 v7 之前的 `structure` 字段，**一律删除**，不沿用也不重新提取——该字段已废弃。
 - 外部 yaml 头部一律忽略。
 
 ### 阶段 3：清单确认
@@ -98,7 +98,7 @@ description: "Merge documentation libraries from one or more other projects into
 用户回复合法 yes 后：
 
 1. 解析 yes 中嵌入的 B/D 类裁决参数。无裁决项默认按"跳过"处理。
-2. 写入所有合并 / 新增文档：用 `fs_write` 写入后立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（自动修复 GBK / BOM / CRLF）。
+2. 写入所有合并 / 新增文档：用 `fs_write` 写入后立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（默认模式修 BOM / CRLF / 孤立 CR；若不是合法 UTF-8 则拒绝改动并非零退出，此时必须重写该文件，见手册 §6.1）。
 3. 同步更新 `_index.md` 的活跃子模块表 / 归档子模块表。**不修改 `project_config`**。
 4. 调用 §10 归档规则做兜底校验（确保 archived 标记字段齐全）。
 5. 输出最终 unified diff 到审阅文件并告知用户成功。
