@@ -5,6 +5,16 @@ description: "Check, organize, and archive the project documentation library. Ru
 
 > 本 skill 是全局 `~/.agent-docs/manual/doc-system.md` 的执行入口，对应章节：§4（每对话流程）+ §5（命名/冲突）+ §6（写文档约束）+ §10（archived 流程）+ §16（工具脚本）。完整规则以手册为准，本文件只列执行步骤，不复述规则。
 
+## 必要前置
+
+执行本 skill 前必须运行：
+
+```bash
+python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
+```
+
+只有退出码为 0 且返回 `ready: true` 才能继续。适配器或映射缺失、禁用、缺少宿主信任、能力不足、包或宿主变化、原生验证未完成时，停止本 skill 及依赖它的项目流程，报告检查结果，按手册 §16.2 核实当前 AI 软件的能力、建立或修复对应适配器与 Hook，完成验证后重试；体系不绑定 Codex，不能用其他宿主的适配器代替当前宿主；不得改走手动执行或把隔离脚本测试当作宿主验证。安装、诊断和修复文档体系本身可继续，范围不延伸至业务项目操作。
+
 ## 执行步骤
 
 1. 运行全套检测脚本（**禁止逐个手动执行 git 命令**）：
@@ -47,7 +57,7 @@ description: "Check, organize, and archive the project documentation library. Ru
    - **schema 迁移只改 yaml frontmatter、不触碰正文**（v5→v6、v6→v7 皆如此），因此属于本 skill「元信息修复」范畴，不违反下方「绝不主动重写文档主体内容」的硬约束。本 skill 检查**每一份**文档，与 sha 是否漂移无关——全量迁移走这条路径。
 6. 对 `ARCHIVED_BUT_ACTIVE` 项：提议去掉 `archived` / `archived_at` / `archived_reason` 字段，刷新 `commit`，并在 `_index.md` 中从归档区移回活跃区。
 7. 把所有问题聚合到一张"将要执行的改动清单"，按以下分类：
-   - 编码 / 换行修复：使用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>`。默认模式修 BOM / CRLF / 孤立 CR，**不做编码转换**；若文件不是合法 UTF-8，脚本拒绝改动并非零退出，此时该文件需人工确认原编码后用 `--from <enc>` 处理，不要反复重跑默认模式（手册 §6.1）
+   - 编码 / 换行修复：只在 `.agent-docs/.tmp/` 的副本运行 `convert-to-utf8.sh`；默认模式修 BOM / CRLF / 孤立 CR。非法 UTF-8 必须先核实原编码，再对副本用 `--from <enc>` 转换，提案旧文用字节转义展示不可解码内容，不能在批准前改正式文件。
    - Schema版本升级：按新模板完整升级（更新版本号 + 补充新增字段 + 删除已废弃字段）
    - 元信息修复：`commit` 与远端不一致、必填字段缺失
    - 归档动作：`.gitmodules` 已不含的子模块文档标记 `archived: true`（文件留在 `modules/` 不移动）
@@ -56,18 +66,13 @@ description: "Check, organize, and archive the project documentation library. Ru
    - 索引派生表再生：`_index.md` 两张表与文档实际状态不一致，按 `doc-tree.py --emit-index-tables` 输出整节替换
    - 章节补全：缺少 `## 业务逻辑` 等必选章节
    - 冗余字段清理 / schema 迁移：文档 yaml 中包含已删除字段或版本落后，由本 skill 直接清理（见步骤 5）
-8. 将改动清单写入审阅文件：
-   - 直接用 `fs_write` 把清单写入 `<project>/.agent-docs/.tmp/pending-review.md`。
-   - 立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md` 修复编码。
-9. 告知用户：**"诊断结果已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes 执行。"** 对话中只需一句话概要（如"发现 3 项编码问题 + 2 项归档"）。
-10. **必须等用户回复 yes 之后**才动手。
-11. 执行批量改动：
-   - 元信息 / 归档动作的 yaml 修改：用 `fs_write` 写入修改后的 markdown，再立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底。
-   - 仅编码 / 换行问题（无 yaml 改动）的文档：直接 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 原地修复。
+8. 在 `.agent-docs/.tmp/` 准备全部目标的最终内容。按 §16.2 运行 `begin` 指定受影响文档和索引，再用完整 `decisions` 运行 `propose`。归档是内容更新；命名修复用同一提案的 `delete` 旧路径、`update` 新路径并同步索引，保留完整正文；同路径修改只列一次。
+9. 告知用户诊断概要及 `.agent-docs/.tmp/pending-review.md` 路径，要求逐块发送执行器给出的精确确认。清单选择不替代最终确认。
+10. 全部确认后由执行器应用批量修复。检查结果；中断时按 §16.2 使用 `apply` 或 `recover`，不得用直接写入、原地转码或手动移动绕过审批。
 
 ## 硬约束
 
-- **绝不删除文件**。归档仅标记 yaml 字段 `archived: true`，物理删除留给 `/doc-prune`。
+- 归档仅更新 yaml 标记；文档清理交给 `/doc-prune`。命名修复允许同批迁移旧路径到新路径，必须保留完整内容并经精确确认。
 - **绝不主动重写文档主体内容**。仅修复元信息、编码、换行、命名、归档关系。如需改章节内容，让用户走 `/doc-update`。
 - 主模块文档与子模块文档同等对待，不可遗漏。
-- 单次改动超 300 行 diff 按"一份文档一块"拆分。
+- diff 由执行器生成，每块最多 300 行；全部块确认后才执行。

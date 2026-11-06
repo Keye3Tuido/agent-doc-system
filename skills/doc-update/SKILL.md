@@ -5,11 +5,21 @@ description: "Update existing documentation files for one or all submodules in t
 
 > 本 skill 是全局 `~/.agent-docs/manual/doc-system.md` 的执行入口，对应章节：§4（每对话流程，含 STALE 内容判定）+ §7（更新触发条件）+ §8（文档模板）+ §11（diff 提议格式）+ §16（工具脚本）。完整规则以手册为准，本文件只列执行步骤，不复述规则。
 
+## 必要前置
+
+执行本 skill 前必须运行：
+
+```bash
+python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
+```
+
+只有退出码为 0 且返回 `ready: true` 才能继续。适配器或映射缺失、禁用、缺少宿主信任、能力不足、包或宿主变化、原生验证未完成时，停止本 skill 及依赖它的项目流程，报告检查结果，按手册 §16.2 核实当前 AI 软件的能力、建立或修复对应适配器与 Hook，完成验证后重试；体系不绑定 Codex，不能用其他宿主的适配器代替当前宿主；不得改走手动执行或把隔离脚本测试当作宿主验证。安装、诊断和修复文档体系本身可继续，范围不延伸至业务项目操作。
+
 ## 门限协作
 
-先检查宿主唯一标识 `agent-doc-system-context-update-gate` 是否已验证启用。启用时优先遵循手册 §16.2：回读 `doc-gate.py status` 中的待审、三项检查结果及文件哈希，再完成下面的源码核验。实际写入已自动触发检查；只读与无内容变化的写入不产生待审。
+就绪检查通过后，按手册 §16.2：回读 `doc-gate.py status` 中的待审、三项检查结果及文件哈希，再完成下面的源码核验。实际写入已自动触发检查；只读与无内容变化的写入不产生待审。
 
-没有源码变更、用户主动要求更新文档时，用 `doc-gate.py begin --project <project_root> --session <宿主真实会话ID> --document <项目相对文档路径>` 建立审阅。阶段 B 只准备新内容；正式落盘由阶段 C 的门限确认执行。门限未验证启用时按本 skill 的手动流程执行，并准确说明原生硬拦截尚未生效。
+没有源码变更、用户主动要求更新文档时，用 `doc-gate.py begin --project <project_root> --session <宿主真实会话ID> --document <项目相对文档路径>` 建立审阅。阶段 B 只准备新内容；正式落盘由阶段 C 的门限确认执行。门限未就绪时停止；草稿、工具参数和 agent 自述都不能代替原生用户确认。
 
 ## 触发形式
 
@@ -86,24 +96,10 @@ description: "Update existing documentation files for one or all submodules in t
 
 ### 阶段 C：输出与审批
 
-**已验证启用门限时**：按手册 §16.2 为全部受影响文档生成 JSON 决定；无需改动时使用 `review` 并说明源码依据，需要改动时使用 `propose`。新文档和相关索引也放入同一提案。告知用户查看 `.agent-docs/.tmp/pending-review.md` 并逐块发送文件中的精确确认。原生用户输入核验全部摘要后落盘；不将工具参数或 agent 自述当作批准。落盘中断先 `apply`，冲突则 `recover` 撤销旧确认、保留已落盘事实并重新审阅。此模式替代下面的手动 diff/yes 流程，仍须完成首次落地状态检查。
-
-**未启用门限时**，按以下步骤：
-
-1. **initial_bootstrap_done 翻转检查**（前置条件以手册 §13 第二阶段末条为准，此处不复述判据）：
-   - 检查 `_index.md` 的 `project_config.initial_bootstrap_done` 字段。
-   - 若为 `false` 且 §13 的三项前置条件全部满足，则在本次 diff 中包含将其改为 `true`；不满足则不翻，留待后续 `/doc-update` 完成后再翻。
-   - 翻转与其他改动一同走审批，**不得绕过审批直接写入**。
-2. 将全部改动以 unified diff 格式写入审阅文件：
-   - 将修改后的文档内容用 `fs_write` 写入 `<project>/.agent-docs/.tmp/doc-new.md`。
-   - 立即 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/doc-new.md`。
-   - 生成 unified diff：`python3 ~/.agent-docs/scripts/doc-diff.py --old <原始文档> --new <project>/.agent-docs/.tmp/doc-new.md --out <project>/.agent-docs/.tmp/pending-review.md`
-   - 立即 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md`。
-   - 清理临时文件 `<project>/.agent-docs/.tmp/doc-new.md`。
-   - 若涉及多个文档，按上述流程逐个生成，全部追加到同一 `pending-review.md`。
-3. 告知用户：**"改动已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes 落盘。"**
-4. **禁止将大段 diff 逐字输出到对话框**。对话中只需一句话说明改动概要（如"3 份 sha 刷新 + 1 份内容更新"）。
-5. **只有用户回复 yes 之后**才写文件。回复 no 或修改建议则按用户意见调整后重新生成审阅文件。
+1. 检查 `_index.md` 的 `project_config.initial_bootstrap_done`：为 `false` 且手册 §13 的三项前置条件全部满足时，将翻为 `true` 的改动纳入同一提案；条件不满足时保持原值。
+2. 按手册 §16.2 为全部受影响文档生成 JSON 决定；无需改动时使用 `review` 并说明源码依据，需要改动时使用 `propose`。新文档和相关索引也放入同一提案。
+3. 告知用户查看 `.agent-docs/.tmp/pending-review.md` 并逐块发送文件中的精确确认。对话中说明改动概要，禁止逐字输出大段 diff。
+4. 全部摘要经原生用户输入核验后落盘。落盘中断先 `apply`，冲突则 `recover` 撤销旧确认、保留已落盘事实并重新审阅。
 
 ## 硬约束
 

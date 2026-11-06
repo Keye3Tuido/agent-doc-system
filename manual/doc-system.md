@@ -89,7 +89,9 @@ schema_version: 7
 
 ## 4. 任一 doc-* skill 启动时的前置流程
 
-任何 doc-* skill 启动时，必须按以下顺序执行：
+项目 doc-* skill 启动前，必须先运行 `python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready`。只有退出码 0 且返回 `ready: true` 才可继续；否则停止当前 skill 和依赖它的项目流程。安装、诊断及修复文档体系本身（含 `/doc-sync-system`）适用 §16.2 的维护入口，不要求已就绪。
+
+检查通过后，按以下顺序执行：
 
 1. Read `~/.agent-docs/manual/doc-system.md`（本文件）以获取完整规则。
 2. Read 项目 `<proj>/.agent-docs/_index.md`，解析 `project_config` 字段。若文件不存在，执行 §14「冷启动检测」。
@@ -106,7 +108,7 @@ schema_version: 7
    - commit message 信息不足以判断时，进一步看 `git log -p <doc_sha>..<remote_sha> --stat` 或具体文件 diff。
    - **禁止仅凭 sha 不匹配就只刷 commit 字段**——这是历史 bug 来源。
 8. **stale 警告**：以上任意检查发现问题，回复正文**最开头**一行打印 `> [doc-stale] <一句话说明>`，并在收尾的 diff 提议中给出修复方案。只有用户明确说"这次不动文档"才跳过。
-9. 未启用门限时，对话期间不再自动重复扫描，除非用户要求。启用 §16.2 门限后，每次观测到实际文件变化都会重跑三项检查；读取与无内容变化的写入不触发。
+9. §16.2 门限每次观测到实际文件变化都会重跑三项检查；读取与无内容变化的写入不触发。
 
 > 当子模块数量 > `{{submodule_count_throttle_threshold}}` 时考虑节流；低于该阈值时直接全量扫描。
 
@@ -379,9 +381,9 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 ## 11. diff 提议格式
 
-收尾时 agent 主动提议 diff；用户也可主动要求 diff。启用门限时按 §16.2 使用项目相对路径、分块摘要和精确确认替代本节手动 yes/no 流程。
+收尾时 agent 主动提议 diff；用户也可主动要求 diff。正式文档内容通过 §16.2 的 `propose` 与精确用户确认落盘，缺少就绪门限时停止。本节规定审阅的展示格式，手动 diff 与 yes/no 不能替代执行门限。
 
-**输出方式**：因 diff 生成需要新旧两份文件对比，允许一个临时文件作为计算中间产物（非工作流暂存）。流程：(1) `fs_write` 新内容到 `<tmp>` → `convert-to-utf8.sh <tmp>`；(2) `doc-diff.py --old <原文件> --new <tmp> --out pending-review.md`；(3) `convert-to-utf8.sh pending-review.md`；(4) 清理 `<tmp>`。告知用户查看并回复 yes/no。**禁止大段 diff 逐字输出到对话框**。
+**输出方式**：在 `.agent-docs/.tmp/` 准备完整新内容与提案 JSON，按 §16.2 运行 `begin` / `propose`。执行器校验最终库，生成 `pending-review.md` 及逐块确认摘要；不得用手写 diff 或 `doc-diff.py` 的展示结果替代提案。`doc-diff.py` 可用于临时比较。告知用户查看审阅文件，禁止大段 diff 逐字输出到对话框。
 
 格式约束：
 
@@ -390,14 +392,14 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 - 新文件：全文 + `(new file)` 标注。
 - 删除：`(deleted)` 标注。
 - 重命名：`(renamed: old → new)` 标注。
-- 单次 diff 总行数 > 300 行 → 自动按"一份文档一块"拆分为多个独立 diff 块，每块独立审批。
+- 执行器将 diff 拆为每块最多 300 行的独立审阅块；全部块批准后应用同一提案。
 
 ---
 
 ## 12. 工作节奏与边界
 
-- 手动执行 skill 时，stale 检查按 §4 运行；已启用门限的项目按 §16.2 在实际写入后自动检查。
-- 工作过程中发现文档变化时，生成 diff 并等待批准；门限启用时须先完成当前审阅，才可继续项目写入或提交。
+- 项目流程开始前通过 §16.2 就绪检查；stale 检查按 §4 运行，并在实际写入后自动重跑。
+- 工作过程中发现文档变化时，生成 diff 并等待批准；须先完成当前审阅，才可继续项目写入或提交。
 - 新增子模块文档时可参考已有文档（含已归档文档，尤其 fork 同源场景），但内容必须真实匹配新子模块当前状态。
 - **本文件本身的修改**：只在用户主动要求时进行；agent 不可自行修订工作框架。
 
@@ -411,7 +413,7 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 第一阶段（轻）：
 
-- 若项目尚无 `.agent-docs/`，先按 §14 的"无文档库"分支与用户确认是否从全局 `templates/` 初始化骨架。
+- 若项目尚无 `.agent-docs/`，先按 §14 确认初始化意图，再按 §16.2 以索引及主模块为 `begin` 目标准备模板提案。缺少索引不妨碍精确确认初始化；执行器在批准后创建正式文档及空模块目录。
 - 解析 `.gitmodules`，输出子模块清单 + 每个的一句话定位。
 - **不生成任何子模块 .md 文件**，等用户审。
 
@@ -498,7 +500,7 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 | `doc-sync-system.py` | 下载远程 skill 包并安装（备份 → dry-run → 覆写；仅按显式 `OBSOLETE_PATHS` 清理废弃文件） | `python3 ~/.agent-docs/scripts/doc-sync-system.py [--url <url>] [--dry-run] [--no-backup]` |
 
 | `doc-gate.py` | 加载上下文、观测文件变化、保存逐目标审阅、绑定用户确认并恢复落盘；协议见 §16.2 | `python3 ~/.agent-docs/scripts/doc-gate.py status --project <project_root> --session <session_id>` |
-| `doc-gate-install.py` | 能力测试通过后登记五项禁用映射，保留其他策略及信任状态 | `python3 ~/.agent-docs/scripts/doc-gate-install.py --stage-disabled` |
+| `doc-gate-install.py` | 宿主无关的就绪检查、适配器登记与原生验证；附带 Codex 适配器 | `python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready`；`--register-adapter <清单>`；`--start-verification [--session <session_id>]`；`--runtime <目录>`；Codex 专用 `--stage-disabled` / `--inspect-codex` / `--config-dir <目录>` |
 | `test_doc_gate.py` | 隔离 Git 项目的门限行为回归测试 | `python3 ~/.agent-docs/scripts/test_doc_gate.py -q` |
 | `test_doc_gate_install.py` | 隔离配置的安装、哈希锁定与策略保留测试 | `python3 ~/.agent-docs/scripts/test_doc_gate_install.py -q` |
 
@@ -513,30 +515,106 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 ### 16.2 项目文档执行门限
 
-门限标识固定为 `agent-doc-system-context-update-gate`。Python 执行器负责状态与文件核验；登记器要求 Python 3.11 或更高版本以解析宿主 TOML 配置。当前提供 Codex 原生事件适配器。其他 AI 宿主需要具备相应事件、上下文注入、工具拒绝和停止后继续执行的能力，并提供经过验证的适配器，才能宣称该宿主已启用门限。
+门限标识固定为 `agent-doc-system-context-update-gate`。本体系使用宿主无关的执行器、就绪检查和验证协议，不依赖 Codex、特定 IDE 或其配置文件。项目技能及依赖它的流程以已验证的门限为必要前置，不提供手动降级。Python 执行器负责状态与文件核验；工具包要求 Python 3.11 或更高版本。宿主适配器负责连接当前 AI 软件的真实事件、信任和启用状态。
 
-| 事件 | 作用 |
-|---|---|
-| `UserPromptSubmit` | 每轮注入索引、主模块及全部活跃子模块正文；识别精确用户确认 |
-| `SessionStart` | 启动、恢复和压缩后重新加载正文，并核验上次回调后遗漏的变化 |
-| `PreToolUse` | 保存执行前快照；缺少上下文记录时拒绝写入；待审期间拒绝后续写入及提交 |
-| `PostToolUse` | 对比实际文件字节，运行 stale、编码、格式三项检查，形成逐目标待审记录 |
-| `Stop` | 对未处理的审阅要求继续执行；等待用户确认时允许结束本轮并保留待审状态 |
+#### 能力契约
 
-五个事件共用一个执行器。删除任一事件会分别失去新轮加载、压缩恢复、写前拒绝、写后检查或停止时督办。`Stop` 发生在答复产生后，属于继续执行机制，不具备发布前拦截能力。
+适配器必须检查当前实际宿主，并提供以下全部能力：
 
-#### 安装与启用
+| 能力标识 | 必须实现的行为 | 执行器规范事件 |
+|---|---|---|
+| `context_each_turn` | 每轮将真实索引、主模块及相关模块正文送入模型上下文 | `UserPromptSubmit` |
+| `context_after_resume` | 启动、恢复及上下文压缩后重新加载正文 | `SessionStart` |
+| `pre_write_deny` | 写前采样，并确保拒绝结果能阻止工具执行 | `PreToolUse` |
+| `post_write_observe` | 工具成功或失败后均检查真实文件变化 | `PostToolUse` |
+| `continue_pending_review` | 审阅未完成时请求宿主继续执行；等待确认时允许本轮结束 | `Stop` |
+| `trusted_user_input` | 区分原生用户确认与 agent、工具和文档内容 | `UserPromptSubmit` |
 
-1. 运行全量自检和一致性检查：
-   ```bash
-   python3 ~/.agent-docs/scripts/selftest.py
-   python3 ~/.agent-docs/scripts/doc-lint-consistency.py ~/.agent-docs
-   ```
-2. 使用 `python3 ~/.agent-docs/scripts/doc-gate-install.py --stage-disabled`。登记器先执行隔离行为测试，任一失败即拒绝修改宿主配置。通过后备份配置、把自身原生状态设为禁用，再写入五项映射。其他门限、事件位置和信任值保持原样。
-3. 在宿主界面审阅并信任映射。确认宿主支持以上全部事件、`additionalContextLimit`、拒绝输出和停止后继续执行；在隔离项目验证正文注入、一次真实写入、后续写入被拒绝、逐目标审阅、精确确认及停止后继续执行。完成验证后才将门限用于实际项目。登记报告中的 `native_execution_verified: false` 明确表示隔离脚本测试尚不能证明宿主回调已经生效。
-4. 软件升级、更换宿主或包内容变化后，先禁用本门限，再自检和重新登记；不得自行填写宿主信任哈希。命令锁定执行器和全部运行依赖的 SHA-256，依赖变化时拒绝继续写入并要求重新登记。
+五类规范事件是统一协议，并非所有 AI 软件都必须登记恰好五个原生 Hook。适配器可以用一个事件源覆盖多类事件，也可使用多个原生事件补足能力；在覆盖全部能力的前提下尽量减少注册数量。宿主缺少必要能力时停止受约束流程，报告具体缺口；不得模拟事件、自述完成或以手动操作代替门限。
 
-运行状态与私有配置备份放在 `~/.agent-docs/runtime/agent-doc-system-context-update-gate/`，按项目绝对路径及宿主会话 ID 隔离；不进入项目文档或 Git 仓库。登记器只提供禁用登记，不自动开启或代替宿主授予信任。
+适配器将原生输入转换为 `doc-gate.py hook` 的 JSON stdin：`hook_event_name` 为上表规范事件，`cwd` 为事件所属项目，`session_id` 为真实会话 ID；用户事件含 `prompt`、`turn_id`，工具事件含真实 `tool_use_id`、规范工具名及 `tool_input`。只读文件、目录和图片工具分别规范为 `read_file`、`list_directory`、`view_image`；命令执行规范为 `Bash`，参数为 `command`；补丁规范为 `apply_patch`，参数也为 `command`。这些是协议名称，不要求宿主原生工具同名。
+
+适配器必须将输出转换成宿主实际支持的协议：`hookSpecificOutput.additionalContext` 注入正文，`permissionDecision: deny` 阻止工具，`systemMessage` 反馈观测结果，`decision: block` 与 `reason` 请求继续执行。不得仅打印 JSON 就宣称效果生效。`Stop` 是继续执行机制，不是答复发布前拦截。
+
+#### 安装与适配器登记
+
+先运行全量自检和一致性检查：
+
+```bash
+python3 ~/.agent-docs/scripts/selftest.py
+python3 ~/.agent-docs/scripts/doc-lint-consistency.py ~/.agent-docs
+```
+
+检查当前 AI 软件是否已有匹配的适配器；缺失时，按上述能力契约核实宿主接口，建立适配器及对应 Hook，再登记验证。不能把其他软件的适配器当作当前软件的实现。当前包附带 Codex 适配器，其他宿主通过下面的统一接口接入；附带实现的范围不限制体系的使用宿主。
+
+每个适配器提供本机 JSON 清单，例如：
+
+```json
+{
+  "schema_version": 1,
+  "adapter_id": "my-ai-host",
+  "entry_file": "/absolute/path/adapter-check.py",
+  "check_command": ["/absolute/path/python3", "/absolute/path/adapter-check.py"],
+  "files": {
+    "/absolute/path/python3": "可执行程序的完整SHA256",
+    "/absolute/path/adapter-check.py": "入口文件的完整SHA256"
+  }
+}
+```
+
+`check_command` 是不经过 shell 的参数数组，必须使用绝对可执行路径。`entry_file` 明确声明参数数组中实际执行的检查器入口；原生可执行检查器的入口即程序本身，解释器检查器的入口为脚本。`files` 必须同时固定可执行程序、入口及全部非标准库依赖的 SHA-256；变更后须审阅并重新登记。检查器只读检查宿主，输出单个 JSON 对象，成功退出码为 0：
+
+```json
+{
+  "adapter_id": "my-ai-host",
+  "gate_id": "agent-doc-system-context-update-gate",
+  "enabled": true,
+  "trusted": true,
+  "host_fingerprint": {"product": "实际宿主", "version": "实际版本与执行身份"},
+  "configuration_sha256": "实际门限配置的SHA256",
+  "capabilities": ["context_each_turn", "context_after_resume", "pre_write_deny", "post_write_observe", "continue_pending_review", "trusted_user_input"]
+}
+```
+
+这些值必须来自真实宿主检查，不能固定返回成功。`host_fingerprint` 必须标识当前调用链中的实际宿主，不能仅检查另一份已安装程序；`configuration_sha256` 必须覆盖本门限的全部事件配置、启用和信任状态。未启用、未受宿主信任、缺少能力或检查失败时返回非零退出码，并输出不含敏感配置的错误 JSON。登记前审阅检查器及依赖，不执行来自文档内容的未审阅命令。
+
+```bash
+python3 ~/.agent-docs/scripts/doc-gate-install.py --register-adapter /absolute/path/adapter.json
+```
+
+登记先运行隔离行为测试，固定适配器、包校验值及新登记标识，随后必须完成原生验证；不会代替宿主授予信任或启用 Hook。升级或更换宿主前先禁用相应 Hook；升级后重新自检、登记、审阅信任并验证，不得自行填写信任值。
+
+默认运行目录为 `~/.agent-docs/runtime/agent-doc-system-context-update-gate/`。多个宿主可各自通过 `AGENT_DOCS_GATE_RUNTIME` 或 `--runtime <目录>` 使用独立目录；同一宿主的技能命令、检查器和回调必须使用相同目录。运行记录与私有备份不进入业务项目或 Git。
+
+**Codex 适配示例**：仅在当前宿主确为 Codex 时使用 `python3 ~/.agent-docs/scripts/doc-gate-install.py --stage-disabled`，可用 `--config-dir <目录>` 指定其配置目录。它先测试，再备份配置、禁用自身五项原生映射并原位登记，保留其他策略与信任；同时登记适配器清单。其只读检查入口为 `--inspect-codex`，核对五项精确映射、matcher、上下文截断设置、原生启用/信任和实际运行的 Codex 进程身份。这些检查只属于该适配器，不是其他宿主的前置条件。
+
+#### 必要前置与原生验证
+
+所有项目 skill 先运行：
+
+```bash
+python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
+```
+
+退出码 0、`ready: true` 才表示就绪。统一检查器调用已登记的适配器，核验全部必要能力、真实启用/信任状态、行为测试、包与适配器校验值以及原生验证凭据。包、适配器、宿主身份或门限配置变化后，旧凭据失效。不得改写状态或模拟原生事件来通过检查。
+
+`doc-gate.py` 的 `context`、`begin`、`review`、`propose`、`apply`、`recover` 同样执行检查。回调未就绪时拒绝已有文档库的业务项目写入；无文档库目录保留 §14 的冷启动提示，不能宣称已加载文档。`status`、受限只读诊断、适配器登记和隔离验证可继续。安装、诊断和修复体系本身（含 `/doc-sync-system`）可操作全局包、IDE 副本和门限登记；此维护范围不延伸至业务项目流程。
+
+在宿主审阅信任、仅为隔离验证启用相应 Hook 后，创建尚未绑定会话的隔离项目：
+
+```bash
+python3 ~/.agent-docs/scripts/doc-gate-install.py --start-verification
+```
+
+命令输出 `project`、`nonce` 和绑定值。以该目录为工作区，在当前 AI 软件打开新会话；适配器转发的首个真实 `SessionStart` 将会话 ID 绑定到记录。不要用 shell 的 `cd` 假设宿主会话根目录已改变。验证期间仅此隔离项目及绑定会话可使用业务入口。已确定同一会话根目录就是 probe 时可显式传 `--session <session_id>`；否则使用新会话绑定。
+
+1. 新会话启动后再发送普通用户消息，核对模型能复述索引中的 `nonce`，确认启动与用户输入两类事件均送达完整正文；压缩恢复也必须具备同等能力。
+2. 使用宿主工具修改 `probe.txt`，检查 `status` 中的真实变动与三项检查；再尝试写入，确认宿主拒绝执行且目标内容未变。直接调用 `doc-gate.py hook` 不能替代真实工具事件。
+3. 保留未审状态结束答复，观察宿主采纳继续请求并自动运行下一步工具；仅输出 `decision: block` 或人工续聊不能证明此能力。继续后逐目标审阅并提议修改主模块文档。
+4. 查看提案，发送其精确 `确认文档 …`，核对全部批准后真实落盘。回调效果自动累积到 `native-verification.json`，不接受 CLI 自述完成。
+5. 操作者确认上述实际效果后，在同一隔离项目与会话的原生用户输入中发送 `确认文档门限验证 <nonce>`。缺少任何效果记录即拒绝确认。最后运行 `--require-ready`，通过后才进入业务项目；普通 `yes`、工具参数或手填 `native_execution_verified: true` 均不能代替验证。
+
+统一凭据绑定适配器提供的实际宿主身份与配置、包及观察记录。操作者还须核验宿主是否真正采纳输出；执行器无法独立证明模型是否读懂正文或宿主是否采纳继续请求。直接伪造本机状态或 Hook stdin 属于下述非对抗性边界。
 
 #### 观测与审阅
 
@@ -544,7 +622,7 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 - 对照执行前后真实字节及 Git 暂存区对象处理新增、修改、删除和提交后的变化；仅暂存子模块版本、未切换工作树时同样可检测；工具失败但已写入的内容同样进入待审。只读操作、重复写入相同内容不产生待审。回调缺失时记录未知状态，并在下一次工具、用户输入、恢复或停止事件重新核验。
 - 变动总是检查主模块；按挂载路径及仓库身份补充相关子模块。模块清单或文档变化同时检查索引；允许提案补充相关已有文档和新子模块文档。
 - 脚本执行检查并保存源码、原文档哈希；agent 必须回读状态、核验源码，逐目标判断文档是否仍准确。`unchanged` 必须填写具体原因；需要修改时提供完整新正文。哈希证明审阅对应哪份文件，语义判断的正确性仍需源码证据和人工审阅。
-- 待审期间可读文件、运行受限查询和门限入口，也可用 `apply_patch` 只写 `.agent-docs/.tmp/`。Git 查询使用 `git --no-pager`；`diff`、`log`、`show` 额外带 `--no-ext-diff --no-textconv`，避免外部 diff 或文本转换器产生副作用。
+- 待审期间可读文件、运行受限查询和门限入口，也可用 `apply_patch` 只写 `.agent-docs/.tmp/`。固定检测脚本、`doc-tree.py` 与 `doc-scaffold.py` 可按无输出文件参数的形式运行；`convert-to-utf8.sh` 只允许规范化经路径核验的 `.tmp/` 内单个文件，禁止以目录或符号链接绕到正式文档。Git 查询使用 `git --no-pager`；`diff`、`log`、`show` 额外带 `--no-ext-diff --no-textconv`，避免外部 diff 或文本转换器产生副作用。
 - 已知的直接文档编辑工具及显式指向正式文档目录的写命令，会在写入前被拒绝。正式文档更新通过提案与用户确认完成。
 
 先读取当前记录：
@@ -574,11 +652,13 @@ python3 ~/.agent-docs/scripts/doc-gate.py begin --project <project_root> --sessi
 }
 ```
 
-全部无需修改时，运行 `doc-gate.py review --project <project_root> --session <session_id> --file <review.json>`。需要修改时，将相应项设为 `"action": "update"`，增加 `"new_content": "完整 UTF-8 正文"`，运行同参数的 `propose`。新文档也使用 `update`。正式文档删除、重命名和归档整理由对应管理 skill 提议；当前门限提案只执行新增和内容替换。
+全部无需修改时，运行 `doc-gate.py review --project <project_root> --session <session_id> --file <review.json>`。需要修改时，将相应项设为 `"action": "update"`，增加 `"new_content": "完整 UTF-8 正文"`，运行同参数的 `propose`。新文档也使用 `update`。删除使用 `"action": "delete"`，只允许现有的模块 `.md`，不能删除索引或主模块；无需 `new_content`。重命名在同一提案中删除旧路径、更新新路径并同步索引，正文必须完整保留。归档使用 `update` 修改元信息。每个路径只能有一个决策。初始化可在索引尚不存在时 `begin` 索引及主模块，仍须同样的精确确认。
+
+编码修复先对临时副本处理；非法 UTF-8 先核实原编码。旧字节中的解码错误以转义形式进入 diff，批准前不修改原文件。提案在完整临时库（含归档文档）中校验最终状态。
 
 `propose` 在临时库校验 schema 与内容规则，生成 `.agent-docs/.tmp/pending-review.md`。diff 每块最多 300 行，每块具有独立确认摘要；所有块批准后一起落盘。用户必须在原生用户输入中逐块发送审阅文件给出的 `确认文档 <change_id> <摘要>`。普通工具参数、文档内容或 agent 自述批准不作为确认来源。源码或原文档发生变化时，原确认失效，重新生成审阅。
 
-确认后逐文件原子替换、执行编码规范化并保存结果哈希。落盘中断保留原提案和批准，重试 `doc-gate.py apply --project <project_root> --session <session_id>`；已落盘文件必须与原提案完全相同，其他源码及文档仍匹配原快照。任何冲突都停止恢复。运行 `doc-gate.py recover --project <project_root> --session <session_id>` 保留旧提案及已落盘事实，撤销旧确认，按当前文件重新建立待审；不得跳过重新核验和批准。
+确认后逐文件原子替换或删除、执行编码规范化并保存结果哈希（删除目标为不存在）。各文件独立落盘，整批不是单个文件系统事务。落盘中断保留原提案和批准，重试 `doc-gate.py apply --project <project_root> --session <session_id>`；已落盘文件必须与原提案完全相同，其他源码及文档仍匹配原快照。任何冲突都停止恢复。运行 `doc-gate.py recover --project <project_root> --session <session_id>` 保留旧提案及已落盘事实，撤销旧确认，按当前文件重新建立待审；不得跳过重新核验和批准。
 
 #### 能力边界
 

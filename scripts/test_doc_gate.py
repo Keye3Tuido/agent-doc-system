@@ -22,6 +22,26 @@ class GateTests(unittest.TestCase):
         self.project = self.base / 'project'
         self.project.mkdir()
         self.runtime = self.base / 'runtime'
+        self.config = self.base / 'config'
+        self.config.mkdir(); self.runtime.mkdir()
+        spec = importlib.util.spec_from_file_location('installer_fixture', SCRIPT.with_name('doc-gate-install.py'))
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        installer.host_identity = lambda: {'path': '/synthetic-test-host/codex'}
+        mappings, digest = installer.merged({}, self.config, self.runtime)
+        (self.config / 'hooks.json').write_text(json.dumps(mappings))
+        (self.config / 'config.toml').write_text('\n'.join(
+            '[hooks.state.' + json.dumps(i) + ']\nenabled = true\ntrusted_hash = "synthetic-test-only"'
+            for i in installer.locations(mappings, self.config / 'hooks.json')))
+        fixture_spec = importlib.util.spec_from_file_location('adapter_test_helpers', SCRIPT.with_name('test_doc_gate_install.py'))
+        fixtures = importlib.util.module_from_spec(fixture_spec)
+        fixture_spec.loader.exec_module(fixtures)
+        fixtures.fixture_adapter(installer, self.config, self.runtime)
+        # Synthetic native validation is confined to this temporary test runtime.
+        (self.runtime / 'native-verification.json').write_text(json.dumps({
+            'binding': installer.binding(self.runtime), 'nonce': 'fixture',
+            'effects': ['session_context', 'prompt_context', 'write', 'deny', 'stop', 'continued', 'approval'],
+            'confirmed_prompt_sha256': hashlib.sha256('确认文档门限验证 fixture'.encode()).hexdigest()}))
         self.git('init', '-q')
         self.git('config', 'advice.addEmbeddedRepo', 'false')
         self.git('config', 'user.name', 'Fixture')
@@ -65,6 +85,159 @@ class GateTests(unittest.TestCase):
             context = result['hookSpecificOutput']['additionalContext']
             self.assertIn('Fixture application.', context)
             self.assertIn('doc-context', context)
+
+    def test_direct_cli_context_cannot_bypass_missing_native_gate(self):
+        config = self.base / 'missing-host-config'
+        result = subprocess.run([sys.executable, str(SCRIPT), '--runtime', str(config), 'context', '--project', str(self.project),
+                                 '--session', 'conversation'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('not ready', result.stdout)
+
+    def test_missing_readiness_blocks_write_but_allows_status_and_repair_diagnostics(self):
+        (self.runtime / 'native-verification.json').unlink()
+        output = self.event('PreToolUse', tool_input={'command': 'python change.py'})
+        self.assertEqual(output['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertIn('not ready', output['hookSpecificOutput']['permissionDecisionReason'])
+        self.assertIsNone(self.status()['pending'])
+        for command in ('git --no-pager status',
+                        str(sys.executable) + ' ' + str(SCRIPT.with_name('doc-gate-install.py')) + ' --require-ready',
+                        str(sys.executable) + ' ' + str(SCRIPT.with_name('doc-gate-install.py')) + ' --stage-disabled',
+                        str(sys.executable) + ' ' + str(SCRIPT.with_name('doc-sync-system.py')) + ' --dry-run'):
+            output = self.event('PreToolUse', tool_input={'command': command})
+            self.assertNotIn('permissionDecision', output.get('hookSpecificOutput', {}))
+
+    def test_isolated_probe_collects_gate_effects_before_native_confirmation(self):
+        spec = importlib.util.spec_from_file_location('probe_installer', SCRIPT.with_name('doc-gate-install.py'))
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        installer.host_identity = lambda: {'path': '/synthetic-test-host/codex'}
+        probe = installer.start_verification(self.runtime, 'conversation')
+        self.project = Path(probe['project'])
+        self.docs = self.project / '.agent-docs'
+        self.event('SessionStart')
+        self.event('UserPromptSubmit', prompt='verify context')
+        self.event('PreToolUse')
+        (self.project / 'probe.txt').write_text('after\n')
+        self.event('PostToolUse')
+        output = self.event('PreToolUse')
+        self.assertEqual(output['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertEqual((self.project / 'probe.txt').read_text(), 'after\n')
+        self.assertEqual(self.event('Stop')['decision'], 'block')
+        self.event('PreToolUse', tool_input={'command': 'git --no-pager status'})
+        pending = self.status()['pending']
+        path = self.base / 'probe-review.json'
+        relative = '.agent-docs/doc-library/main-module.md'
+        path.write_text(json.dumps({'change_id': pending['id'], 'decisions': [
+            {'document': relative, 'action': 'update', 'reason': 'Reflect the verified probe responsibility.',
+             'new_content': (self.project / relative).read_text().replace('Native verification fixture.', 'Native verification fixture and approval test.')}] }))
+        self.cli('propose', '--project', str(self.project), '--session', 'conversation', '--file', str(path))
+        pending = self.status()['pending']
+        for block in pending['proposal']['blocks']:
+            self.event('UserPromptSubmit', prompt='确认文档 ' + pending['id'] + ' ' + block['sha256'][:12])
+        self.assertIsNone(self.status()['pending'])
+        with self.assertRaisesRegex(ValueError, 'incomplete'):
+            installer.require_ready(self.runtime)
+        self.event('UserPromptSubmit', prompt='确认文档门限验证 ' + probe['nonce'])
+        self.assertTrue(installer.require_ready(self.runtime)['ready'])
+
+    def test_new_probe_chat_binds_its_actual_session_from_session_start(self):
+        spec = importlib.util.spec_from_file_location('unbound_probe_installer', SCRIPT.with_name('doc-gate-install.py'))
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        installer.host_identity = lambda: {'path': '/synthetic-test-host/codex'}
+        probe = installer.start_verification(self.runtime, None)
+        self.project = Path(probe['project'])
+        output = self.event('SessionStart', session_id='new-real-session')
+        self.assertIn(probe['nonce'], output['hookSpecificOutput']['additionalContext'])
+        self.assertEqual(installer.verification(self.runtime)['session'], 'new-real-session')
+
+    def test_delete_proposal_waits_for_exact_confirmation_and_does_not_recur(self):
+        relative = '.agent-docs/doc-library/modules/orphan.md'
+        path = self.project / relative
+        path.write_text('---\nschema_version: 7\narchived: true\n---\n# Orphan\n')
+        pending = self.cli('begin', '--project', str(self.project), '--session', 'conversation',
+                           '--document', relative)['pending']
+        review = self.base / 'delete-review.json'
+        review.write_text(json.dumps({'change_id': pending['id'], 'decisions': [
+            {'document': relative, 'action': 'delete', 'reason': 'User selected this orphaned archive for removal.'}]}))
+        self.cli('propose', '--project', str(self.project), '--session', 'conversation', '--file', str(review))
+        self.event('UserPromptSubmit', prompt='yes')
+        self.assertTrue(path.exists())
+        pending = self.status()['pending']
+        for block in pending['proposal']['blocks']:
+            self.event('UserPromptSubmit', prompt='确认文档 ' + pending['id'] + ' ' + block['sha256'][:12])
+        self.assertFalse(path.exists())
+        self.assertIsNone(self.status()['pending'])
+        self.event('PreToolUse', tool_input={'command': 'git --no-pager status'})
+        self.event('PostToolUse')
+        self.assertIsNone(self.status()['pending'])
+
+    def test_rename_interrupted_after_delete_resumes_without_losing_new_document(self):
+        old_relative = '.agent-docs/doc-library/modules/old.md'
+        new_relative = '.agent-docs/doc-library/modules/new.md'
+        old_path, new_path = self.project / old_relative, self.project / new_relative
+        text = '---\nschema_version: 7\nrepo: https://github.com/example/module.git\nbranch: main\ncommit: ' + 'a' * 40 + '\n---\n# Module\n'
+        old_path.write_text(text)
+        pending = self.cli('begin', '--project', str(self.project), '--session', 'conversation',
+                           '--document', old_relative, '--document', new_relative)['pending']
+        review = self.base / 'rename-review.json'
+        review.write_text(json.dumps({'change_id': pending['id'], 'decisions': [
+            {'document': old_relative, 'action': 'delete', 'reason': 'Move this complete module to its verified canonical path.'},
+            {'document': new_relative, 'action': 'update', 'reason': 'Preserve the module at its verified canonical path.', 'new_content': text}]}))
+        self.cli('propose', '--project', str(self.project), '--session', 'conversation', '--file', str(review))
+        spec = importlib.util.spec_from_file_location('rename_gate_fixture', SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        gate = module.Gate(self.runtime, self.project, 'conversation')
+        state = gate.load()
+        state['pending']['approved_sha256'] = state['pending']['proposal']['sha256']
+        gate.save(state)
+        real_mkstemp = module.tempfile.mkstemp
+        def interrupt_new_file(*args, **kwargs):
+            if kwargs.get('prefix') == '.doc-apply-':
+                raise RuntimeError('interrupt after deletion')
+            return real_mkstemp(*args, **kwargs)
+        with mock.patch.object(module.tempfile, 'mkstemp', side_effect=interrupt_new_file):
+            with self.assertRaises(RuntimeError):
+                gate.apply(state)
+        self.assertFalse(old_path.exists())
+        self.assertFalse(new_path.exists())
+        self.event('PostToolUse')
+        self.assertEqual(self.status()['pending']['status'], 'applying')
+        self.cli('apply', '--project', str(self.project), '--session', 'conversation')
+        self.assertEqual(new_path.read_text(), text)
+        self.assertFalse(old_path.exists())
+        self.assertIsNone(self.status()['pending'])
+
+    def test_initial_library_creation_uses_proposal_before_index_exists(self):
+        import shutil
+        contents = {str(p.relative_to(self.project)): p.read_text() for p in
+                    (self.docs / '_index.md', self.docs / 'doc-library/main-module.md')}
+        shutil.rmtree(self.docs)
+        args = [item for relative in contents for item in ('--document', relative)]
+        pending = self.cli('begin', '--project', str(self.project), '--session', 'conversation', *args)['pending']
+        review = self.base / 'init-review.json'
+        review.write_text(json.dumps({'change_id': pending['id'], 'decisions': [
+            {'document': r, 'action': 'update', 'reason': 'Initialize approved project documentation.', 'new_content': text}
+            for r, text in contents.items()]}))
+        self.cli('propose', '--project', str(self.project), '--session', 'conversation', '--file', str(review))
+        self.assertFalse((self.docs / '_index.md').exists())
+        pending = self.status()['pending']
+        for block in pending['proposal']['blocks']:
+            self.event('UserPromptSubmit', prompt='确认文档 ' + pending['id'] + ' ' + block['sha256'][:12])
+        for relative, text in contents.items():
+            self.assertEqual((self.project / relative).read_text(), text)
+
+    def test_encoding_repair_can_propose_readable_diff_for_invalid_utf8(self):
+        relative = '.agent-docs/doc-library/main-module.md'
+        (self.project / relative).write_bytes(b'# broken \xff\n')
+        pending = self.cli('begin', '--project', str(self.project), '--session', 'conversation', '--document', relative)['pending']
+        review = self.base / 'encoding-review.json'
+        review.write_text(json.dumps({'change_id': pending['id'], 'decisions': [
+            {'document': relative, 'action': 'update', 'reason': 'Restore the verified text using UTF-8.',
+             'new_content': '---\nschema_version: 7\n---\n# Main\n'}]}))
+        self.cli('propose', '--project', str(self.project), '--session', 'conversation', '--file', str(review))
+        self.assertIn('\\xff', (self.docs / '.tmp/pending-review.md').read_text())
 
     def test_unknown_module_scope_loads_all_active_docs_and_excludes_archives(self):
         modules = self.docs / 'doc-library/modules'
@@ -178,6 +351,33 @@ class GateTests(unittest.TestCase):
         out = self.event('PreToolUse', tool_name='apply_patch', tool_input={'command': patch})
         self.assertEqual(out['hookSpecificOutput']['permissionDecision'], 'deny')
 
+    def test_pending_review_allows_fixed_readonly_diagnostics_and_scratch_normalization(self):
+        import shlex
+        self.write_source()
+        for name in ('doc-stale-check.py', 'doc-encoding-check.py', 'doc-format-check.py', 'doc-tree.py', 'doc-scaffold.py'):
+            command = shlex.join([sys.executable, str(SCRIPT.parent / name), str(self.project)])
+            output = self.event('PreToolUse', tool_input={'command': command})
+            self.assertNotIn('permissionDecision', output.get('hookSpecificOutput', {}), name)
+        draft = self.docs / '.tmp/draft.md'
+        draft.parent.mkdir(parents=True, exist_ok=True)
+        draft.write_text('# draft\n')
+        converter = str(SCRIPT.parent / 'convert-to-utf8.sh')
+        command = shlex.join(['bash', converter, '--from', 'gb18030', str(draft)])
+        output = self.event('PreToolUse', tool_input={'command': command})
+        self.assertNotIn('permissionDecision', output.get('hookSpecificOutput', {}))
+        for destination in (self.docs / 'doc-library/main-module.md', self.docs / '.tmp', self.project / 'main.py'):
+            command = shlex.join(['bash', converter, str(destination)])
+            output = self.event('PreToolUse', tool_input={'command': command})
+            self.assertEqual(output['hookSpecificOutput']['permissionDecision'], 'deny')
+        (self.docs / '.tmp/formal-link').symlink_to(self.docs / 'doc-library', target_is_directory=True)
+        command = shlex.join(['bash', converter, str(self.docs / '.tmp/formal-link/main-module.md')])
+        output = self.event('PreToolUse', tool_input={'command': command})
+        self.assertEqual(output['hookSpecificOutput']['permissionDecision'], 'deny')
+        for flag in ('--out', '--o', '--out='):
+            command = shlex.join([sys.executable, str(SCRIPT.parent / 'doc-tree.py'), str(self.project), flag, str(self.project / 'main.py')])
+            output = self.event('PreToolUse', tool_input={'command': command})
+            self.assertEqual(output['hookSpecificOutput']['permissionDecision'], 'deny')
+
     def test_invalid_proposal_format_rejected(self):
         self.write_source()
         path = self.proposal('No YAML frontmatter\n')
@@ -205,7 +405,7 @@ class GateTests(unittest.TestCase):
 
     def test_corrupt_state_allows_diagnostics_but_denies_writing(self):
         self.event('UserPromptSubmit', prompt='start')
-        next(self.runtime.glob('*.json')).write_text('{broken')
+        next(self.runtime.glob('[0-9a-f]' + '?' * 63 + '.json')).write_text('{broken')
         output = self.event('PreToolUse', tool_input={'command': 'git --no-pager diff --no-ext-diff --no-textconv'})
         self.assertNotIn('permissionDecision', output.get('hookSpecificOutput', {}))
         output = self.event('PreToolUse')
@@ -264,7 +464,7 @@ class GateTests(unittest.TestCase):
         doc.write_text('---\nschema_version: 7\nrepo: https://github.com/example/lib.git\nbranch: main\ncommit: ' + 'a' * 40 + '\n---\n# Lib\n')
         self.git('add', '.')
         self.git('commit', '-qm', 'submodule')
-        for state_file in self.runtime.glob('*.json'):
+        for state_file in self.runtime.glob('[0-9a-f]' + '?' * 63 + '.json'):
             state_file.unlink()
         self.event('UserPromptSubmit', prompt='load new module')
         self.event('PreToolUse')
@@ -332,7 +532,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(self.status()['pending']['status'], 'awaiting_approval')
 
     def test_missing_context_proof_blocks_write_until_context_command(self):
-        state_file = next(self.runtime.glob('*.json'))
+        state_file = next(self.runtime.glob('[0-9a-f]' + '?' * 63 + '.json'))
         state = json.loads(state_file.read_text())
         state.pop('context')
         state_file.write_text(json.dumps(state))
@@ -358,7 +558,7 @@ class GateTests(unittest.TestCase):
         (self.project / '.gitmodules').write_text('[submodule "lib"]\n path = lib\n url = https://github.com/example/lib.git\n')
         self.git('add', '.')
         self.git('commit', '-qm', 'add module')
-        for state_file in self.runtime.glob('*.json'):
+        for state_file in self.runtime.glob('[0-9a-f]' + '?' * 63 + '.json'):
             state_file.unlink()
         self.event('UserPromptSubmit', prompt='start')
         self.event('PreToolUse')
@@ -370,7 +570,7 @@ class GateTests(unittest.TestCase):
         self.write_source()
         path = self.proposal()
         self.cli('propose', '--project', str(self.project), '--session', 'conversation', '--file', str(path))
-        state_file = next(self.runtime.glob('*.json'))
+        state_file = next(self.runtime.glob('[0-9a-f]' + '?' * 63 + '.json'))
         state = json.loads(state_file.read_text())
         old_id = state['pending']['id']
         state['pending']['status'] = 'applying'
@@ -395,7 +595,7 @@ class GateTests(unittest.TestCase):
             (self.docs / ('doc-library/modules/large' + str(i) + '.md')).write_text('---\nschema_version: 7\n---\n# Module\n' + 'text ' * 14000)
         self.git('add', '.')
         self.git('commit', '-qm', 'large library')
-        for state_file in self.runtime.glob('*.json'):
+        for state_file in self.runtime.glob('[0-9a-f]' + '?' * 63 + '.json'):
             state_file.unlink()
         result = self.event('UserPromptSubmit', prompt='architecture')
         self.assertIn('exceeds', result['hookSpecificOutput']['additionalContext'])

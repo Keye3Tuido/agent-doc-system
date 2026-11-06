@@ -27,7 +27,7 @@ import uuid
 GATE_ID = 'agent-doc-system-context-update-gate'
 VERSION = '1.0.0'
 HERE = Path(__file__).resolve().parent
-DEFAULT_RUNTIME = HERE.parent / 'runtime' / GATE_ID
+DEFAULT_RUNTIME = Path(os.environ.get('AGENT_DOCS_GATE_RUNTIME', HERE.parent / 'runtime' / GATE_ID)).expanduser()
 EVENTS = ('UserPromptSubmit', 'SessionStart', 'PreToolUse', 'PostToolUse', 'Stop')
 
 
@@ -101,8 +101,8 @@ def helper(name):
 TREE = helper('doc-tree.py')
 
 
-def documents(project):
-    if not (project / '.agent-docs/_index.md').exists():
+def documents(project, include_archived=False):
+    if not include_archived and not (project / '.agent-docs/_index.md').exists():
         return []
     paths = ['.agent-docs/_index.md', '.agent-docs/doc-library/main-module.md']
     modules = project / '.agent-docs/doc-library/modules'
@@ -110,7 +110,7 @@ def documents(project):
         for path in sorted(modules.glob('*.md')):
             relative = str(path.relative_to(project))
             inside(project, relative)
-            if str((TREE.extract_meta(str(path)) or {}).get('archived', '')).lower() != 'true':
+            if include_archived or str((TREE.extract_meta(str(path)) or {}).get('archived', '')).lower() != 'true':
                 paths.append(relative)
     return [p for p in paths if inside(project, p).exists()]
 
@@ -230,8 +230,48 @@ def readonly(event):
         return False
     if not tokens:
         return True
-    if Path(tokens[0]).name in ('python', 'python3') and len(tokens) > 2:
-        return Path(tokens[1]).resolve() == Path(__file__).resolve() and tokens[2] in ('context', 'status', 'begin', 'review', 'propose', 'apply', 'recover')
+    if Path(tokens[0]).name == 'bash' and len(tokens) >= 3 and Path(tokens[1]).resolve() == HERE / 'convert-to-utf8.sh':
+        options = tokens[2:]
+        if options[:1] == ['--from'] and len(options) >= 3 and not options[1].startswith('-'):
+            options = options[2:]
+        elif options and options[0].startswith('--from=') and options[0] != '--from=':
+            options = options[1:]
+        if options[:1] == ['--']:
+            options = options[1:]
+        if len(options) != 1 or options[0].startswith('-'):
+            return False
+        try:
+            project = project_root(event['cwd'])
+            path = Path(options[0])
+            if not path.is_absolute():
+                path = Path(event['cwd']) / path
+            relative = str(path.relative_to(project))
+            return (relative.startswith('.agent-docs/.tmp/') and '..' not in Path(relative).parts
+                    and inside(project, relative).is_file() and not path.is_symlink()
+                    and path.resolve().is_relative_to(project / '.agent-docs/.tmp'))
+        except (OSError, ValueError, KeyError):
+            return False
+    if re.fullmatch(r'python(?:3(?:\.\d+)?)?', Path(tokens[0]).name) and len(tokens) > 2:
+        script = Path(tokens[1]).resolve()
+        if script.name in ('doc-stale-check.py', 'doc-encoding-check.py', 'doc-format-check.py', 'doc-tree.py', 'doc-scaffold.py') and script.parent == HERE:
+            # These exact forms write only stdout; reject argparse abbreviations of --out.
+            options, positional = tokens[2:], 0
+            while options:
+                item, options = options[0], options[1:]
+                if item == '--docs-dir' and script.name != 'doc-scaffold.py' and options:
+                    options = options[1:]
+                elif item == '--emit-index-tables' and script.name == 'doc-tree.py':
+                    pass
+                elif item.startswith('-'):
+                    return False
+                else:
+                    positional += 1
+            return positional <= (2 if script.name == 'doc-scaffold.py' else 1)
+        if script in (HERE / 'doc-sync-system.py', HERE.parent / 'installers/install-global.py'):
+            return True
+        if script == HERE / 'doc-gate-install.py':
+            return any(t in ('--require-ready', '--stage-disabled', '--start-verification', '--register-adapter', '--inspect-codex') for t in tokens[2:])
+        return script == Path(__file__).resolve() and any(t in ('context', 'status', 'begin', 'review', 'propose', 'apply', 'recover') for t in tokens[2:])
     if tokens[0] == 'git' and len(tokens) > 2 and tokens[1] == '--no-pager':
         command = tokens[2]
         if command in ('diff', 'log', 'show') and not {'--no-ext-diff', '--no-textconv'}.issubset(tokens):
@@ -291,13 +331,16 @@ def validate_proposal(project, updates):
     # Existing issues in unrelated files do not prevent repairing one target.
     with tempfile.TemporaryDirectory(prefix='doc-gate-validate-') as folder:
         root = Path(folder)
-        for relative in documents(project):
+        for relative in documents(project, include_archived=True):
             dest = root / relative
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(inside(project, relative), dest)
         (root / '.agent-docs/doc-library/modules').mkdir(parents=True, exist_ok=True)
         for relative, text in updates.items():
             path = root / relative
+            if text is None:
+                path.unlink(missing_ok=True)
+                continue
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding='utf-8')
         result = subprocess.run([sys.executable, str(HERE / 'doc-format-check.py'), str(root)],
@@ -438,8 +481,15 @@ class Gate:
                 if not isinstance(text, str) or not text.strip() or '\r' in text or text.startswith('\ufeff'):
                     raise ValueError('proposal must contain non-empty UTF-8 LF text')
                 updates[relative] = text
-                old = path.read_text() if path.exists() else ''
+                old = path.read_bytes().decode('utf-8', errors='backslashreplace') if path.exists() else ''
                 diff.extend(difflib.unified_diff(old.splitlines(keepends=True), text.splitlines(keepends=True), fromfile=relative, tofile=relative))
+            elif action == 'delete' and propose:
+                if not re.fullmatch(r'\.agent-docs/doc-library/modules/[^/]+\.md', relative) or not path.is_file():
+                    raise ValueError('delete requires an existing module document; index and main must be replaced')
+                updates[relative] = None
+                old = path.read_bytes().decode('utf-8', errors='backslashreplace')
+                diff.extend(list(difflib.unified_diff(old.splitlines(keepends=True), [], fromfile=relative, tofile='/dev/null'))
+                            or ['--- ' + relative + '\n', '+++ /dev/null\n'])
             elif action != 'unchanged':
                 raise ValueError('use propose for documentation updates')
         if updates:
@@ -477,12 +527,13 @@ class Gate:
         changed = changed_paths(self.project, pending['snapshot'], snapshot(self.project))
         if pending.get('status') == 'applying':
             changed = [p for p in changed if p not in proposal['updates'] or
-                       file_hash(inside(self.project, p)) != sha(proposal['updates'][p].encode())]
+                       file_hash(inside(self.project, p)) != (sha(proposal['updates'][p].encode()) if proposal['updates'][p] is not None else None)]
         if changed:
             raise ValueError('source changed since approval preparation')
         for relative, expected in pending['documents'].items():
             actual = file_hash(inside(self.project, relative))
-            already_applied = pending.get('status') == 'applying' and relative in proposal['updates'] and actual == sha(proposal['updates'][relative].encode())
+            already_applied = (pending.get('status') == 'applying' and relative in proposal['updates'] and
+                               actual == (sha(proposal['updates'][relative].encode()) if proposal['updates'][relative] is not None else None))
             if actual != expected and not already_applied:
                 raise ValueError('document changed since approval preparation')
         # Prevalidate every destination before writing any file. Each replacement is
@@ -491,6 +542,9 @@ class Gate:
         pending['status'] = 'applying'
         self.save(state)
         for relative, path in paths.items():
+            if proposal['updates'][relative] is None:
+                path.unlink(missing_ok=True)
+                continue
             path.parent.mkdir(parents=True, exist_ok=True)
             fd, temp = tempfile.mkstemp(dir=path.parent, prefix='.doc-apply-')
             try:
@@ -503,6 +557,8 @@ class Gate:
         state['last_review'] = {'change_id': pending['id'], 'status': 'applied', 'proposal_sha256': proposal['sha256'],
                                 'documents': {r: file_hash(p) for r, p in paths.items()}}
         state['pending'] = None
+        if (self.project / '.agent-docs/_index.md').is_file():
+            (self.project / '.agent-docs/doc-library/modules').mkdir(parents=True, exist_ok=True)
         state['last_snapshot'] = snapshot(self.project)
         self.save(state)
 
@@ -510,8 +566,6 @@ class Gate:
         state = self.load()
         name = event['hook_event_name']
         if name in ('UserPromptSubmit', 'SessionStart'):
-            if not (self.project / '.agent-docs/_index.md').exists():
-                return {'hookSpecificOutput': {'hookEventName': name, 'additionalContext': context(self.project)['text']}}
             if name == 'UserPromptSubmit' and isinstance(event.get('prompt'), str):
                 match = re.fullmatch(r'\s*确认文档 ([a-f0-9]{16}) ([a-f0-9]{12})\s*', event['prompt'])
                 pending = state.get('pending') or {}
@@ -531,6 +585,8 @@ class Gate:
                     self.save(state)
                     if pending.get('approved_sha256'):
                         self.apply(state)
+            if not (self.project / '.agent-docs/_index.md').exists():
+                return {'hookSpecificOutput': {'hookEventName': name, 'additionalContext': context(self.project)['text']}}
             state['context'] = {}
             self.save(state)
             ctx = context(self.project)
@@ -547,7 +603,7 @@ class Gate:
                     p = state['pending']['proposal']
                     text += '；等待用户确认，已批准 ' + str(len(p['approvals'])) + '/' + str(len(p['blocks']))
             return {'hookSpecificOutput': {'hookEventName': name, 'additionalContext': text}}
-        if not (self.project / '.agent-docs/_index.md').exists():
+        if not (self.project / '.agent-docs/_index.md').exists() and not state.get('pending'):
             return {}
         if name == 'Stop':
             current = snapshot(self.project)
@@ -569,7 +625,7 @@ class Gate:
             if state.get('last_snapshot'):
                 self.update(state, state['last_snapshot'], current)
             state['last_snapshot'] = current
-            if not state.get('context', {}).get('documents') and not readonly(event):
+            if not state.get('context', {}).get('documents') and not (readonly(event) or review_patch(event, self.project)):
                 self.save(state)
                 return {'hookSpecificOutput': {'hookEventName': name, 'permissionDecision': 'deny',
                         'permissionDecisionReason': '[doc-context] 缺少上下文加载记录；先运行 doc-gate.py context --project <项目> --session <会话>。'}}
@@ -622,8 +678,16 @@ def main():
         else:
             gate = Gate(args.runtime, args.project, args.session)
         with gate.locked():
+            installer = helper('doc-gate-install.py')
+            if args.command == 'hook':
+                installer.bind_verification(args.runtime, gate.project, gate.session, event)
+            if (args.command != 'status' and
+                    (args.command != 'hook' or (gate.project / '.agent-docs/_index.md').is_file() or gate.load().get('pending'))):
+                installer.require_ready(args.runtime, gate.project, gate.session)
             if args.command == 'hook':
                 result = gate.hook(event)
+                installer.observe_verification(args.runtime, gate.project, gate.session,
+                                               event, result, gate.load())
             elif args.command == 'context':
                 result = context(gate.project, args.document)
                 state = gate.load()

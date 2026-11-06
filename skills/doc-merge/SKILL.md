@@ -5,6 +5,16 @@ description: "Merge documentation libraries from one or more other projects into
 
 > 本 skill 是全局 `~/.agent-docs/manual/doc-system.md` 的执行入口，对应章节：§5（命名/冲突）+ §6（写文档约束）+ §9（yaml schema）+ §10（archived 流程）+ §11（diff 提议格式）+ §16（工具脚本）。完整规则以手册为准，本文件只列执行步骤，不复述规则。
 
+## 必要前置
+
+执行本 skill 前必须运行：
+
+```bash
+python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
+```
+
+只有退出码为 0 且返回 `ready: true` 才能继续。适配器或映射缺失、禁用、缺少宿主信任、能力不足、包或宿主变化、原生验证未完成时，停止本 skill 及依赖它的项目流程，报告检查结果，按手册 §16.2 核实当前 AI 软件的能力、建立或修复对应适配器与 Hook，完成验证后重试；体系不绑定 Codex，不能用其他宿主的适配器代替当前宿主；不得改走手动执行或把隔离脚本测试当作宿主验证。安装、诊断和修复文档体系本身可继续，范围不延伸至业务项目操作。
+
 ## 触发形式
 
 `/doc-merge <other-project-steering-path1> [<other-project-steering-path2> ...]`
@@ -77,50 +87,33 @@ description: "Merge documentation libraries from one or more other projects into
 
 ### 阶段 3：清单确认
 
-把阶段 1 + 2 的产物聚合为一份审阅文件：
+把阶段 1 + 2 的候选与来源写入 `.agent-docs/.tmp/merge-candidates.md`，列出 A 类引入、B 类选择、C 类章节合并依据、D 类多源选择及备份位置。请用户明确 B/D 类裁决（如 `B1=1 D1=keep=path-a`）；未裁决项保持待选，不擅自默认处理。此阶段是内容选择，不授权正式写入。
 
-- 直接用 `fs_write` 把合并清单写入 `<project>/.agent-docs/.tmp/pending-review.md`。
-- 立即用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <project>/.agent-docs/.tmp/pending-review.md` 修复编码。
+### 阶段 4：提案 + 同步
 
-清单分类：
-
-- **A 类（活跃引入）**：N 份，列文件名 + 来源外部路径。
-- **B 类（待用户决定）**：N 项，每项标注 `(1)/(2)/(3)`，等用户在 yes 回复中嵌入选择，例如 `yes B1=1, B2=2, B3=3`。
-- **C 类（章节级合并）**：N 份，每份列出"采纳的章节数 / 保留原值并加注释的章节数"，并在审阅文件中给出**完整 unified diff**。
-- **D 类（多源独有）**：N 项，列各副本来源 + 让用户选 `keep=<source>` 或 `skip`。
-- **备份位置**：`.agent-docs/.tmp/merge-backup-<timestamp>/`。
-
-**对话中只输出概要**（如"3 份引入 + 5 项待裁决 + 7 份章节合并"），告知用户：
-> 改动已写入 `.agent-docs/.tmp/pending-review.md`，请查看后回复 yes（含 B/D 类裁决，例如 `yes B1=1 B2=2 D1=keep=path-a`）落盘。
-
-### 阶段 4：执行 + 同步
-
-用户回复合法 yes 后：
-
-1. 解析 yes 中嵌入的 B/D 类裁决参数。无裁决项默认按"跳过"处理。
-2. 写入所有合并 / 新增文档：用 `fs_write` 写入后立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（默认模式修 BOM / CRLF / 孤立 CR；若不是合法 UTF-8 则拒绝改动并非零退出，此时必须重写该文件，见手册 §6.1）。
-3. 同步更新 `_index.md` 的活跃子模块表 / 归档子模块表。**不修改 `project_config`**。
-4. 调用 §10 归档规则做兜底校验（确保 archived 标记字段齐全）。
-5. 输出最终 unified diff 到审阅文件并告知用户成功。
+1. 根据裁决在 `.agent-docs/.tmp/` 准备全部合并和新增文档，并再生索引表。保留 `project_config`，不修改主模块；检查归档字段齐全。
+2. 按 §16.2 运行 `begin` 指定受影响目标；用完整 `decisions` 和 `new_content` 运行 `propose`，让执行器生成最终 `.agent-docs/.tmp/pending-review.md`。不覆盖执行器生成的审阅文件。
+3. 告知用户概要与审阅路径，要求逐块发送精确 `确认文档 <change_id> <摘要>`。B/D 裁决和普通 yes 不能替代确认。
+4. 全部确认后由执行器写入并规范编码，核验最终结果与索引。
 
 ### 阶段 5：副本处理
 
 合并成功 → 询问"是否删除备份 `.agent-docs/.tmp/merge-backup-<timestamp>/`？回复 yes 删除。"用户回复 yes 才物理删除；其他回答保留备份。
 
-合并失败（任何阶段抛异常或用户中途取消）→ 询问"是否从备份恢复并删除已写入的失败产物？回复 yes 恢复。"用户回复 yes 才执行恢复。
+合并失败或取消时保留备份和已落盘事实。未完成的提案按 §16.2 使用 `apply` 或 `recover`；需要从备份恢复正式文档时，重新核验并生成恢复提案（含需删除的新增模块），经全部精确确认后执行，不能直接拷回。
 
 ## 硬约束
 
-- **不接受 "yes" 之外的批准词**；不接受隐式同意。
+- 正式文档操作只接受执行器绑定当前提案的精确用户确认。备份位于临时目录，其清理可按阶段 5 单独确认。
 - **绝不动外部项目的 `.agent-docs/`**。本 skill 对外部路径只读。
 - **绝不修改当前项目 `_index.md.project_config`**。这是身份信息。
 - **绝不修改 `doc-library/main-module.md`**。主模块不参与跨项目合并。
 - **B 类、D 类必须经用户裁决**，agent 不得擅自决定。
 - 章节级合并时，每个差异点必须有明确的"实际项目验证"动作（读源码、读配置、读 .gitmodules），不能凭推测。
 - 写文件强制 UTF-8 / 无 BOM / LF / 无句中硬换行。
-- diff 必须通过 `fs_write` 直接写入 `pending-review.md` 审阅文件，**禁止逐字输出到对话**。
-- 单次 diff 总行数 > 300 行 → 自动按"一份文档一块"拆分（§11）。
+- 最终 diff 必须由 `propose` 生成，禁止把大段 diff 逐字输出到对话。
+- diff 每块最多 300 行，由执行器拆分并逐块绑定确认。
 
 ## 失败回滚
 
-阶段 4 写入过程中出错 → 立即停止，保留已写入的部分文件，输出错误位置 + 当前状态，进入阶段 5 的失败分支等用户决定恢复或保留。
+阶段 4 落盘出错时停止，保留提案、已批准记录与部分文件，报告错误位置及当前状态，按 §16.2 核验后恢复。
