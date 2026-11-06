@@ -502,6 +502,10 @@ def main():
         test_sync_obsolete(tmp)
         test_lint(tmp)
         test_content_constraints(tmp)
+        for script in ("test_doc_gate.py", "test_doc_gate_install.py"):
+            result = subprocess.run([sys.executable, os.path.join(HERE, script), "-q"],
+                                    capture_output=True, text=True, timeout=120)
+            check(script + " behavioral tests", result.returncode == 0, result.stdout + result.stderr)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -641,6 +645,12 @@ def test_lint(tmp):
     root = make_lint_pkg(tmp, "clean")
     rc, out = run_lint(root)
     check("lint 对无瑕疵包报 ALL_PASS", rc == 0 and "ALL_PASS" in out, out)
+
+    quoted = make_lint_pkg(tmp, "single-quotes", [
+        (os.path.join("scripts", "doc-format-check.py"),
+         'add_argument("--docs-dir",', "add_argument('--docs-dir',")])
+    rc, out = run_lint(quoted)
+    check("lint recognizes single-quoted CLI flags", rc == 0 and "ALL_PASS" in out, out)
 
     cases = [
         ("MANUAL_SECTION_REF", "\u5f15\u7528\u4e0d\u5b58\u5728\u7684\u7ae0\u8282",

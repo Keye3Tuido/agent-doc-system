@@ -2,7 +2,7 @@
 
 基于项目的 git submodule 结构自动构建文档库，描述各模块的职责与架构。以远程 URL、仓库、分支作为文档划分依据；以文档内容与实际代码是否一致、远端 commit sha 与文档记录是否一致作为更新依据。
 
-系统为纯 skill + 存储形态，不依赖任何 IDE 的自动加载机制。每个 doc-* skill 在执行前主动读取手册，支持 Claude Code、Cursor、Kiro IDE、VSCode (GitHub Copilot)、Deepseek TUI 作为运行环境。
+系统由技能、检测脚本和项目文档库组成，可在支持技能或读取 SKILL.md 的 AI 环境中使用。可选执行门限目前提供 Codex 原生适配器，在实际文件变化后运行检查并保存审阅状态；其他宿主需适配和验证原生事件。能力范围见手册 §16.2。
 
 ## 安装
 
@@ -14,7 +14,29 @@
 python3 agent-doc-system/installers/install-global.py
 ```
 
-将 `manual/`、`scripts/`、`skills/` 安装到 `~/.agent-docs/`。
+将手册、脚本、技能、模板、安装器及根目录配置安装到 `~/.agent-docs/`。
+
+Codex 可同时同步实际使用的技能目录：
+
+```bash
+python3 agent-doc-system/installers/install-global.py --upgrade --skills-target ~/.agents/skills
+```
+
+仅同步包内 doc-* 的 SKILL.md，保留其他技能及附加文件。升级后对比全局包和实际 IDE 文件，避免运行旧副本。
+
+### 可选：Codex 执行门限
+
+登记器要求 Python 3.11 或更高版本，以解析宿主 TOML 配置。
+
+```bash
+python3 ~/.agent-docs/scripts/selftest.py
+python3 ~/.agent-docs/scripts/doc-lint-consistency.py ~/.agent-docs
+python3 ~/.agent-docs/scripts/doc-gate-install.py --stage-disabled
+```
+
+唯一标识为 `agent-doc-system-context-update-gate`，五个事件覆盖每轮上下文、压缩恢复、写前限制、写后检查和停止时督办。登记前运行能力测试；映射保持禁用，须经宿主审阅、信任和隔离验证后启用。项目文档提案按文件哈希绑定，每块 diff 经原生用户输入精确确认后落盘；中断可恢复，冲突可撤销旧确认并重审。
+
+观测范围限于当前项目及已初始化子模块中的 Git 跟踪文件与非忽略新文件。原生回调可能被绕过或失败放行；`Stop` 能要求继续执行，不能在答复发布前拦截。完整协议、确认方式及限制见手册 §16.2。
 
 ### 第二步：为各 IDE 安装 skill
 
@@ -126,7 +148,7 @@ python3 ~/.agent-docs/installers/install-global.py --upgrade --purge
 
 | 指令 | 用途 |
 |---|---|
-| `/doc-context` | 加载文档库作为上下文。两步加载：yml 快速索引 → 按需读正文 |
+| `/doc-context` | 加载索引、主模块及相关模块正文；支持原生事件注入和加载记录 |
 | `/doc-init` | 初始化新项目的文档库（第一阶段：扫子模块出清单） |
 | `/doc-update [module]` | 更新文档。sha 漂移检测 → 内容刷新 → diff 审批 → 落盘 |
 | `/doc-doctor` | 健康检查：编码/schema/命名/归档/冗余字段/章节缺失 |
@@ -142,8 +164,8 @@ python3 ~/.agent-docs/installers/install-global.py --upgrade --purge
 agent-doc-system/
 ├── README.md
 ├── urls.conf
-├── manual/doc-system.md     # 全局操作手册（16 章）
-├── scripts/                 # 10 个工具脚本
+├── manual/doc-system.md     # 全局操作手册（含门限协议）
+├── scripts/                 # 工具脚本与行为测试
 ├── skills/                  # 9 个 doc-* skill
 ├── installers/install-global.py
 └── templates/               # _index.md, main-module.md（schema v7）

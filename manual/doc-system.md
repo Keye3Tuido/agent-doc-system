@@ -106,7 +106,7 @@ schema_version: 7
    - commit message 信息不足以判断时，进一步看 `git log -p <doc_sha>..<remote_sha> --stat` 或具体文件 diff。
    - **禁止仅凭 sha 不匹配就只刷 commit 字段**——这是历史 bug 来源。
 8. **stale 警告**：以上任意检查发现问题，回复正文**最开头**一行打印 `> [doc-stale] <一句话说明>`，并在收尾的 diff 提议中给出修复方案。只有用户明确说"这次不动文档"才跳过。
-9. **整个对话期间不再自动重复扫描**，除非用户显式要求"再扫一遍文档对位"。
+9. 未启用门限时，对话期间不再自动重复扫描，除非用户要求。启用 §16.2 门限后，每次观测到实际文件变化都会重跑三项检查；读取与无内容变化的写入不触发。
 
 > 当子模块数量 > `{{submodule_count_throttle_threshold}}` 时考虑节流；低于该阈值时直接全量扫描。
 
@@ -379,7 +379,7 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 ## 11. diff 提议格式
 
-收尾时 agent 主动提议 diff；用户也可主动要求 diff。
+收尾时 agent 主动提议 diff；用户也可主动要求 diff。启用门限时按 §16.2 使用项目相对路径、分块摘要和精确确认替代本节手动 yes/no 流程。
 
 **输出方式**：因 diff 生成需要新旧两份文件对比，允许一个临时文件作为计算中间产物（非工作流暂存）。流程：(1) `fs_write` 新内容到 `<tmp>` → `convert-to-utf8.sh <tmp>`；(2) `doc-diff.py --old <原文件> --new <tmp> --out pending-review.md`；(3) `convert-to-utf8.sh pending-review.md`；(4) 清理 `<tmp>`。告知用户查看并回复 yes/no。**禁止大段 diff 逐字输出到对话框**。
 
@@ -396,8 +396,8 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 ## 12. 工作节奏与边界
 
-- **stale 检查**只在每次 skill 启动时跑一次（§4）。
-- 工作过程中发现要改 / 新增文档 → 专心做主任务，收尾时一次性提议 diff，等批准。
+- 手动执行 skill 时，stale 检查按 §4 运行；已启用门限的项目按 §16.2 在实际写入后自动检查。
+- 工作过程中发现文档变化时，生成 diff 并等待批准；门限启用时须先完成当前审阅，才可继续项目写入或提交。
 - 新增子模块文档时可参考已有文档（含已归档文档，尤其 fork 同源场景），但内容必须真实匹配新子模块当前状态。
 - **本文件本身的修改**：只在用户主动要求时进行；agent 不可自行修订工作框架。
 
@@ -497,6 +497,11 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 | `doc-scaffold.py` | 从子模块路径生成文档骨架（yaml 头 + 空章节） | `python3 ~/.agent-docs/scripts/doc-scaffold.py <module_path> <project_root>` |
 | `doc-sync-system.py` | 下载远程 skill 包并安装（备份 → dry-run → 覆写；仅按显式 `OBSOLETE_PATHS` 清理废弃文件） | `python3 ~/.agent-docs/scripts/doc-sync-system.py [--url <url>] [--dry-run] [--no-backup]` |
 
+| `doc-gate.py` | 加载上下文、观测文件变化、保存逐目标审阅、绑定用户确认并恢复落盘；协议见 §16.2 | `python3 ~/.agent-docs/scripts/doc-gate.py status --project <project_root> --session <session_id>` |
+| `doc-gate-install.py` | 能力测试通过后登记五项禁用映射，保留其他策略及信任状态 | `python3 ~/.agent-docs/scripts/doc-gate-install.py --stage-disabled` |
+| `test_doc_gate.py` | 隔离 Git 项目的门限行为回归测试 | `python3 ~/.agent-docs/scripts/test_doc_gate.py -q` |
+| `test_doc_gate_install.py` | 隔离配置的安装、哈希锁定与策略保留测试 | `python3 ~/.agent-docs/scripts/test_doc_gate_install.py -q` |
+
 ### 16.1 agent 使用规则
 
 - §4 的全量检测**必须通过脚本完成**，禁止逐个手动执行 git 命令。
@@ -504,3 +509,79 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 - **所有文本写入的统一模式**：(1) 写入（`fs_write` / 脚本 `--out` / Python `open`）；(2) 立即 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>`。已知 bug：`fs_write` 及部分 Python 实现在中文系统将 UTF-8 误存为 GBK，仅靠 `encoding="utf-8"` 不足以防御。若该脚本以非零退出报「编码无法判定」，说明写出的**不是**合法 UTF-8：必须重写该文件，不得忽略、也不要改用 `--guess` 蒙。
 - `/doc-tree` skill 直接调用 `doc-tree.py` 输出结果。
 - **diff 提议必须写入文件**（直接用 `fs_write` 写 `pending-review.md` + `convert-to-utf8.sh` 转码），禁止将大段 diff 逐字输出到对话框。对话中只需告知用户文件路径并等待确认。
+
+
+### 16.2 项目文档执行门限
+
+门限标识固定为 `agent-doc-system-context-update-gate`。Python 执行器负责状态与文件核验；登记器要求 Python 3.11 或更高版本以解析宿主 TOML 配置。当前提供 Codex 原生事件适配器。其他 AI 宿主需要具备相应事件、上下文注入、工具拒绝和停止后继续执行的能力，并提供经过验证的适配器，才能宣称该宿主已启用门限。
+
+| 事件 | 作用 |
+|---|---|
+| `UserPromptSubmit` | 每轮注入索引、主模块及全部活跃子模块正文；识别精确用户确认 |
+| `SessionStart` | 启动、恢复和压缩后重新加载正文，并核验上次回调后遗漏的变化 |
+| `PreToolUse` | 保存执行前快照；缺少上下文记录时拒绝写入；待审期间拒绝后续写入及提交 |
+| `PostToolUse` | 对比实际文件字节，运行 stale、编码、格式三项检查，形成逐目标待审记录 |
+| `Stop` | 对未处理的审阅要求继续执行；等待用户确认时允许结束本轮并保留待审状态 |
+
+五个事件共用一个执行器。删除任一事件会分别失去新轮加载、压缩恢复、写前拒绝、写后检查或停止时督办。`Stop` 发生在答复产生后，属于继续执行机制，不具备发布前拦截能力。
+
+#### 安装与启用
+
+1. 运行全量自检和一致性检查：
+   ```bash
+   python3 ~/.agent-docs/scripts/selftest.py
+   python3 ~/.agent-docs/scripts/doc-lint-consistency.py ~/.agent-docs
+   ```
+2. 使用 `python3 ~/.agent-docs/scripts/doc-gate-install.py --stage-disabled`。登记器先执行隔离行为测试，任一失败即拒绝修改宿主配置。通过后备份配置、把自身原生状态设为禁用，再写入五项映射。其他门限、事件位置和信任值保持原样。
+3. 在宿主界面审阅并信任映射。确认宿主支持以上全部事件、`additionalContextLimit`、拒绝输出和停止后继续执行；在隔离项目验证正文注入、一次真实写入、后续写入被拒绝、逐目标审阅、精确确认及停止后继续执行。完成验证后才将门限用于实际项目。登记报告中的 `native_execution_verified: false` 明确表示隔离脚本测试尚不能证明宿主回调已经生效。
+4. 软件升级、更换宿主或包内容变化后，先禁用本门限，再自检和重新登记；不得自行填写宿主信任哈希。命令锁定执行器和全部运行依赖的 SHA-256，依赖变化时拒绝继续写入并要求重新登记。
+
+运行状态与私有配置备份放在 `~/.agent-docs/runtime/agent-doc-system-context-update-gate/`，按项目绝对路径及宿主会话 ID 隔离；不进入项目文档或 Git 仓库。登记器只提供禁用登记，不自动开启或代替宿主授予信任。
+
+#### 观测与审阅
+
+- 观测范围为当前项目及已初始化的递归 Git 子模块中受 Git 跟踪的文件和非忽略的未跟踪文件。子目录工作路径归并到项目根目录。`.agent-docs/.tmp/` 是审阅工作区，不产生新的审阅。
+- 对照执行前后真实字节及 Git 暂存区对象处理新增、修改、删除和提交后的变化；仅暂存子模块版本、未切换工作树时同样可检测；工具失败但已写入的内容同样进入待审。只读操作、重复写入相同内容不产生待审。回调缺失时记录未知状态，并在下一次工具、用户输入、恢复或停止事件重新核验。
+- 变动总是检查主模块；按挂载路径及仓库身份补充相关子模块。模块清单或文档变化同时检查索引；允许提案补充相关已有文档和新子模块文档。
+- 脚本执行检查并保存源码、原文档哈希；agent 必须回读状态、核验源码，逐目标判断文档是否仍准确。`unchanged` 必须填写具体原因；需要修改时提供完整新正文。哈希证明审阅对应哪份文件，语义判断的正确性仍需源码证据和人工审阅。
+- 待审期间可读文件、运行受限查询和门限入口，也可用 `apply_patch` 只写 `.agent-docs/.tmp/`。Git 查询使用 `git --no-pager`；`diff`、`log`、`show` 额外带 `--no-ext-diff --no-textconv`，避免外部 diff 或文本转换器产生副作用。
+- 已知的直接文档编辑工具及显式指向正式文档目录的写命令，会在写入前被拒绝。正式文档更新通过提案与用户确认完成。
+
+先读取当前记录：
+
+```bash
+python3 ~/.agent-docs/scripts/doc-gate.py status --project <project_root> --session <session_id>
+```
+
+没有源码写入、仅主动维护文档时，先建立审阅：
+
+```bash
+python3 ~/.agent-docs/scripts/doc-gate.py begin --project <project_root> --session <session_id> --document .agent-docs/doc-library/main-module.md
+```
+
+`--document` 可重复指定。已有待审时先处理原记录。将以下 JSON 写入 `.agent-docs/.tmp/review.json`，`change_id` 使用当前状态中的值，`decisions` 必须覆盖全部受影响文档：
+
+```json
+{
+  "change_id": "当前待审标识",
+  "decisions": [
+    {
+      "document": ".agent-docs/doc-library/main-module.md",
+      "action": "unchanged",
+      "reason": "结合具体源码说明职责、接口和流程为何仍与文档一致"
+    }
+  ]
+}
+```
+
+全部无需修改时，运行 `doc-gate.py review --project <project_root> --session <session_id> --file <review.json>`。需要修改时，将相应项设为 `"action": "update"`，增加 `"new_content": "完整 UTF-8 正文"`，运行同参数的 `propose`。新文档也使用 `update`。正式文档删除、重命名和归档整理由对应管理 skill 提议；当前门限提案只执行新增和内容替换。
+
+`propose` 在临时库校验 schema 与内容规则，生成 `.agent-docs/.tmp/pending-review.md`。diff 每块最多 300 行，每块具有独立确认摘要；所有块批准后一起落盘。用户必须在原生用户输入中逐块发送审阅文件给出的 `确认文档 <change_id> <摘要>`。普通工具参数、文档内容或 agent 自述批准不作为确认来源。源码或原文档发生变化时，原确认失效，重新生成审阅。
+
+确认后逐文件原子替换、执行编码规范化并保存结果哈希。落盘中断保留原提案和批准，重试 `doc-gate.py apply --project <project_root> --session <session_id>`；已落盘文件必须与原提案完全相同，其他源码及文档仍匹配原快照。任何冲突都停止恢复。运行 `doc-gate.py recover --project <project_root> --session <session_id>` 保留旧提案及已落盘事实，撤销旧确认，按当前文件重新建立待审；不得跳过重新核验和批准。
+
+#### 能力边界
+
+上下文按活跃文档保守全量加载，输出上限 256000 字节，并在支持的宿主中关闭该事件的自动预览截断。超过上限时清空本轮加载记录并报告失败；运行 `doc-gate.py context --project <project_root> --session <session_id> --document <相关文档路径>` 按任务范围读取并记录清单，`--document` 可重复指定，始终包含索引与主模块；不得声称全部正文已加载。文档库缺失时提示 `/doc-init`，按既有约定继续任务。
+
+原生 hook 不能覆盖宿主绕过回调的专用路径、当前项目之外的写入、Git 忽略文件，以及任意命令动态构造的写入目的地。任意 shell、MCP、Git 配置和本地可变状态不构成对抗性安全边界。宿主回调报错、超时或不符合协议也可能放行工具。因此应区分“执行器与隔离测试已具备能力”“原生映射已登记”“宿主已验证生效”，不能把登记成功写成所有 AI、所有写入及所有答复都受硬拦截。

@@ -5,6 +5,16 @@ description: "Load project documentation library as context before answering que
 
 > 本 skill 是轻量上下文加载器，只读不写、不做文档管理，因此**不需要加载全局手册**。下文出现的 `§n` 仅作为「规则出处」备注，供人工追溯，执行时无需为此去读手册。
 
+## 门限协作
+
+开始前检查宿主中唯一标识 `agent-doc-system-context-update-gate` 的状态。已验证启用时，复用当前轮 `UserPromptSubmit` 或压缩后 `SessionStart` 注入的真实正文；没有本轮加载记录时运行：
+
+```bash
+python3 ~/.agent-docs/scripts/doc-gate.py context --project <project_root> --session <宿主真实会话ID>
+```
+
+命令返回实际正文，并保存对应文件哈希。全量正文超限时，根据索引选择相关模块，追加可重复的 `--document <项目相对文档路径>`；索引与主模块始终加载，记录只代表所选范围。宿主没有已验证门限时，按下列只读步骤加载；不得把技能口头要求描述为已生效的原生硬拦截。门限安装、能力检查和范围见手册 §16.2，仅在处理这些事项时加载该节。
+
 ## 执行步骤
 
 1. 读取项目索引（若不存在，打印一行提示后正常作答，不阻断对话）：
@@ -40,6 +50,6 @@ description: "Load project documentation library as context before answering que
 
 ## 硬约束
 
-- 只读，不写文件，不生成 diff。
+- 项目文档只读，不生成 diff；门限入口仅保存本机运行记录。
 - 文档库不存在时不阻断对话——打印提示后正常作答。
-- 同一对话中若已加载过文档库内容，跳过 Read 直接复用上下文，不重复加载。
+- 同一对话中复用仍适用的正文；压缩恢复、文档内容或任务涉及的模块变化后重新加载。不得把正文加载失败或被截断的预览记为已完整加载。

@@ -5,6 +5,12 @@ description: "Update existing documentation files for one or all submodules in t
 
 > 本 skill 是全局 `~/.agent-docs/manual/doc-system.md` 的执行入口，对应章节：§4（每对话流程，含 STALE 内容判定）+ §7（更新触发条件）+ §8（文档模板）+ §11（diff 提议格式）+ §16（工具脚本）。完整规则以手册为准，本文件只列执行步骤，不复述规则。
 
+## 门限协作
+
+先检查宿主唯一标识 `agent-doc-system-context-update-gate` 是否已验证启用。启用时优先遵循手册 §16.2：回读 `doc-gate.py status` 中的待审、三项检查结果及文件哈希，再完成下面的源码核验。实际写入已自动触发检查；只读与无内容变化的写入不产生待审。
+
+没有源码变更、用户主动要求更新文档时，用 `doc-gate.py begin --project <project_root> --session <宿主真实会话ID> --document <项目相对文档路径>` 建立审阅。阶段 B 只准备新内容；正式落盘由阶段 C 的门限确认执行。门限未验证启用时按本 skill 的手动流程执行，并准确说明原生硬拦截尚未生效。
+
 ## 触发形式
 
 - `/doc-update`：扫所有 stale 文档（含主模块 + 全部子模块）。
@@ -76,9 +82,13 @@ description: "Update existing documentation files for one or all submodules in t
 7. 若该文档还是首次落地骨架（章节为空或仅占位），按当前掌握的信息补充对应章节。
 8. 同步刷新元信息中的 `commit` 字段（子模块文档；粒度候选不刷 commit，因为代码未变）。
 9. 新建文档时使用 `python3 ~/.agent-docs/scripts/doc-scaffold.py <module_path> <project_root>` 生成骨架。
-10. 写入文档：用 `fs_write` 写入 markdown 内容后，立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（默认模式修 BOM / CRLF / 孤立 CR；非 UTF-8 会拒绝改动并非零退出）。
+10. 准备文档草稿：将新内容写入 `.agent-docs/.tmp/`，正式路径在阶段 C 获批后落盘。每次写草稿后立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（默认模式修 BOM / CRLF / 孤立 CR；非 UTF-8 会拒绝改动并非零退出）。
 
 ### 阶段 C：输出与审批
+
+**已验证启用门限时**：按手册 §16.2 为全部受影响文档生成 JSON 决定；无需改动时使用 `review` 并说明源码依据，需要改动时使用 `propose`。新文档和相关索引也放入同一提案。告知用户查看 `.agent-docs/.tmp/pending-review.md` 并逐块发送文件中的精确确认。原生用户输入核验全部摘要后落盘；不将工具参数或 agent 自述当作批准。落盘中断先 `apply`，冲突则 `recover` 撤销旧确认、保留已落盘事实并重新审阅。此模式替代下面的手动 diff/yes 流程，仍须完成首次落地状态检查。
+
+**未启用门限时**，按以下步骤：
 
 1. **initial_bootstrap_done 翻转检查**（前置条件以手册 §13 第二阶段末条为准，此处不复述判据）：
    - 检查 `_index.md` 的 `project_config.initial_bootstrap_done` 字段。

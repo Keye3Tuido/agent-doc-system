@@ -42,6 +42,8 @@ import sys
 KNOWN_HOME_PREFIXES = (
     "~/.agent-docs",
     "~/.agent/skills",
+    "~/.agents/skills",
+    "~/.codex",
     "~/.claude",
     "~/.kiro",
     "~/.cursor",
@@ -141,7 +143,7 @@ class Lint:
         if not os.path.isfile(path):
             return None
         src = read(path)
-        flags = set(re.findall(r'add_argument\(\s*"(--[a-z][a-z0-9-]*)"', src))
+        flags = set(re.findall(r'''add_argument\(\s*["'](--[a-z][a-z0-9-]*)["']''', src))
         # bash scripts declare flags in case patterns / --flag=* forms
         flags |= set(re.findall(r'(--[a-z][a-z0-9-]*)\)', src))
         flags |= set(re.findall(r'(--[a-z][a-z0-9-]*)=\*', src))

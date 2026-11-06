@@ -129,8 +129,11 @@ def collect_changes(src_root):
         if not os.path.isdir(src_t):
             continue
         dst_t = os.path.join(AGENT_DOCS_HOME, target)
-        for dirpath, _, files in os.walk(src_t):
+        for dirpath, dirs, files in os.walk(src_t):
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
             for f in files:
+                if f.endswith((".pyc", ".pyo")):
+                    continue
                 sp = os.path.join(dirpath, f)
                 rel = os.path.relpath(sp, src_t)
                 dp = os.path.join(dst_t, rel)

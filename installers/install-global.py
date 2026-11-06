@@ -21,7 +21,7 @@ import sys
 
 AGENT_DOCS_HOME = os.path.expanduser("~/.agent-docs")
 TARGETS = ("manual", "scripts", "skills", "templates", "installers")
-ROOT_FILES = ("urls.conf",)  # 根目录下需要安装的单文件
+ROOT_FILES = ("urls.conf", "README.md")  # 根目录下需要安装的单文件
 
 
 def collect_source_files(src_root):
@@ -35,8 +35,11 @@ def collect_source_files(src_root):
         src_t = os.path.join(src_root, target)
         if not os.path.isdir(src_t):
             continue
-        for dirpath, _, filenames in os.walk(src_t):
+        for dirpath, dirs, filenames in os.walk(src_t):
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
             for f in filenames:
+                if f.endswith((".pyc", ".pyo")):
+                    continue
                 rel = os.path.relpath(os.path.join(dirpath, f), src_t)
                 files.add(os.path.join(target, rel))
     return files
@@ -66,6 +69,7 @@ def main():
     p.add_argument("--upgrade", action="store_true")
     p.add_argument("--purge", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--skills-target", default=None, help="Also synchronize doc-* SKILL.md files into this IDE skills directory")
     args = p.parse_args()
 
     src_root = os.path.abspath(args.source or os.path.dirname(os.path.dirname(__file__)))
@@ -96,8 +100,11 @@ def main():
         if not os.path.isdir(src_t):
             continue
         dst_t = os.path.join(AGENT_DOCS_HOME, target)
-        for dirpath, _, files in os.walk(src_t):
+        for dirpath, dirs, files in os.walk(src_t):
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
             for f in files:
+                if f.endswith((".pyc", ".pyo")):
+                    continue
                 sp = os.path.join(dirpath, f)
                 rel = os.path.relpath(sp, src_t)
                 dp = os.path.join(dst_t, rel)
@@ -112,6 +119,18 @@ def main():
                         replaced.append((sp, dp))
                     else:
                         skipped.append(dp)
+
+    if args.skills_target:
+        from pathlib import Path
+        skills_root = Path(src_root) / "skills"
+        for source in sorted(skills_root.glob("doc-*/SKILL.md")):
+            dest = Path(args.skills_target).expanduser() / source.parent.name / "SKILL.md"
+            if dest.exists() and dest.read_bytes() == source.read_bytes():
+                skipped.append(str(dest))
+            elif dest.exists() and not args.upgrade:
+                skipped.append(str(dest))
+            else:
+                (replaced if dest.exists() else added).append((str(source), str(dest)))
 
     # Purge stale files (destination has, source doesn't)
     if args.purge:

@@ -14,6 +14,10 @@ description: "Download and install the latest doc-system package (skills + scrip
 
 ## 执行步骤
 
+### 门限升级前置检查
+
+若宿主已登记 `agent-doc-system-context-update-gate`，升级前先在宿主禁用该门限；保留其他策略和信任状态。升级后运行全量自检与一致性检查，再使用 `doc-gate-install.py --stage-disabled` 重新锁定包内容。经宿主审阅及隔离验证后启用；不得自动填写信任值或把脚本测试视为原生回调验证。
+
 ### 阶段 A：脚本驱动（首选）
 
 1. 先 dry-run 让用户确认改动范围：
@@ -55,7 +59,7 @@ description: "Download and install the latest doc-system package (skills + scrip
 
 全局 `~/.agent-docs/` 更新完成后（无论经由阶段 A 还是阶段 B），执行以下步骤将变更同步到各 IDE 的 skill 目录。
 
-1. **检测当前 IDE 的安装方式**。agent 根据自身运行环境确定当前 IDE 的 skill 安装目录（如 Kiro 对应 `~/.kiro/skills/`，Claude Code 对应 `~/.claude/commands/`，DeepSeek 对应 `~/.deepseek/skills/`，Cursor 对应 `~/.cursor/skills/`，VSCode/GitHub Copilot 对应 `~/.copilot/skills/`），然后检查该目录中与 `~/.agent-docs/skills/` 同名的条目类型：
+1. **检测当前 IDE 的安装方式**。agent 根据自身运行环境确定当前 IDE 的 skill 安装目录（Codex 使用实际解析到的 `~/.agents/skills/` 或 `~/.codex/skills/`；如 Kiro 对应 `~/.kiro/skills/`，Claude Code 对应 `~/.claude/commands/`，DeepSeek 对应 `~/.deepseek/skills/`，Cursor 对应 `~/.cursor/skills/`，VSCode/GitHub Copilot 对应 `~/.copilot/skills/`），然后检查该目录中与 `~/.agent-docs/skills/` 同名的条目类型：
    - 若为**软链接**（`os.path.islink()` 为 True）→ 标记为 `symlink`
    - 若为**普通文件/目录**（非软链接） → 标记为 `copy`
    - 若目录不存在或为空 → 标记为 `not_installed`，跳过
@@ -72,7 +76,7 @@ description: "Download and install the latest doc-system package (skills + scrip
        ADDED:    doc-new/SKILL.md
      是否同步？(yes/no)
      ```
-   - 用户确认后，使用 `cp -R`（或 `shutil.copytree`）将对应 skill 目录从 `~/.agent-docs/skills/<name>/` 覆盖到 IDE 目录下的同名位置。
+   - 结合会话已有授权执行同步。目录式 IDE 可运行 `python3 ~/.agent-docs/installers/install-global.py --source ~/.agent-docs --upgrade --skills-target <IDE技能目录>`，只同步 doc-* 的 `SKILL.md`，不覆盖其他技能或用户附加文件。
    - **不删除 IDE 目录中用户自行添加的、不在 `~/.agent-docs/skills/` 中的条目**。
    - 输出同步摘要。
 
