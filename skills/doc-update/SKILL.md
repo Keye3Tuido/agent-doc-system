@@ -9,6 +9,10 @@ description: "Update existing documentation files for one or all submodules in t
 
 使用前检查当前 AI 宿主是否已登记并启用 `agent-doc-system-silent-workflow` 的读取前、写后和收尾职责；当前 Codex 用 `doc-workflow.py status` 检查，缺失时按手册 §16.3 登记并在宿主审阅，其他 AI 使用等效事件。安装与维护本体系可以继续，不因门限未启用而锁死修复。钩子的条件和进度只送内部上下文，不向用户播报或索要日常批准。
 
+原生入口按 `agent-doc-system-silent-workflow/<宿主事件名>` 稳定唯一命名；Codex 的完整名称为 `agent-doc-system-silent-workflow/PreToolUse`、`agent-doc-system-silent-workflow/PostToolUse`、`agent-doc-system-silent-workflow/Stop`。首次使用、上下文恢复或配置变化时，逐项核对名称、事件、匹配范围、执行命令、启用及宿主信任状态；同名文件、登记成功或信任字段存在不能代替实际触发证据。重新登记原位更新，名称冲突时保留配置并先查明归属，不能追加重复入口。Codex 用 `statusMessage` 保存名称，宿主可能显示运行标签；日常检查仍只送内部上下文。
+
+验证在隔离环境覆盖六项：三个入口实际执行、重复登记不增加入口、两个系统名称不冲突、无关策略及状态保留、失败命令已产生的写入仍触发同步、重复收尾在文档未同步时不得正常放行。分别记录脚本测试、登记、启用与宿主原生回调结果；失败或未验证项不得计为通过。
+
 收到内部同步要求时运行 `doc-workflow.py inspect --project <project_root>`，核验相关源码并同步文档后，用返回的 source 摘要运行 `complete --source <摘要> --reason <源码依据与同步结论>`。该完成记录由 agent 保存，不是用户确认。源文件再变或文档被修改后重新核验，未同步时不得正常结束；提交审阅仍按手册 §16.2 请求用户确认。
 
 ## 触发形式

@@ -18,6 +18,10 @@ description: "Download and install the latest doc-system package (skills + scrip
 
 安装手册、脚本与技能副本；静默宿主入口按手册 §16.3 检查与更新，不要求专用会话绑定。升级后保留项目已有的 Git 提交门限；全局脚本位置不变时无需重复安装。旧 `agent-doc-system-context-update-gate` 注册必须从宿主移除；新版 `agent-doc-system-silent-workflow` 负责静默核验和同步，其他策略保持原样。
 
+每个原生入口以 `agent-doc-system-silent-workflow/<宿主事件名>` 唯一命名。Codex 三项分别为 `agent-doc-system-silent-workflow/PreToolUse`、`agent-doc-system-silent-workflow/PostToolUse`、`agent-doc-system-silent-workflow/Stop`，名称不随目录、日期或重复安装改变。升级时逐项核对名称、事件和命令；原位更新已有入口，重名或归属不明时保留配置并先诊断，避免重复登记。Codex 的 `statusMessage` 用于显示名称，日常核验不请求用户确认。
+
+更新入口后，在隔离环境检查唯一命名、重复登记、无关策略保留、三个事件执行，以及失败写入和重复收尾的同步行为。文档未同步时重复收尾也必须阻止正常结束。登记、脚本验证、宿主信任、启用和原生触发实测分别记录；发现失败或缺口时如实保留，不据登记成功声称生效。沿用用户已有启用意图，命令变更后按宿主规则重新信任，禁止自行填写信任摘要。
+
 ### 阶段 A：脚本驱动（首选）
 
 1. 先 dry-run 让用户确认改动范围：

@@ -16,6 +16,7 @@ import tomllib
 
 GATE_ID = 'agent-doc-system-silent-workflow'
 EVENTS = ('PreToolUse', 'PostToolUse', 'Stop')
+HOOK_LABELS = {event: GATE_ID + '/' + event for event in EVENTS}
 HERE = Path(__file__).resolve().parent
 
 
@@ -219,7 +220,8 @@ def registration(config):
     command = shlex.join([sys.executable, str(HERE / 'doc-workflow.py'), 'hook', '--gate-id', GATE_ID])
     for event in EVENTS:
         groups = data.setdefault('hooks', {}).setdefault(event, [])
-        entry = {'type': 'command', 'command': command, 'timeout': 60}
+        entry = {'type': 'command', 'command': command, 'timeout': 60,
+                 'statusMessage': HOOK_LABELS[event]}
         found = [(g, i) for g in groups for i, h in enumerate(g.get('hooks', [])) if owned(h)]
         if len(found) > 1:
             raise ValueError('Duplicate document hooks; preserve configuration for review.')
@@ -231,6 +233,11 @@ def registration(config):
             if event != 'Stop':
                 group['matcher'] = '.*'
             groups.append(group)
+    labels = [h.get('statusMessage') for groups in data['hooks'].values()
+              for group in groups for h in group.get('hooks', [])]
+    for label in HOOK_LABELS.values():
+        if labels.count(label) != 1:
+            raise ValueError('Duplicate document hook name: ' + label)
     return data
 
 
@@ -301,7 +308,7 @@ def status(config_dir):
             for hi, item in enumerate(group.get('hooks', [])):
                 if owned(item):
                     state = states.get(f'{path}:{key}:{gi}:{hi}', {})
-                    entries.append({'event': event, 'enabled': state.get('enabled'),
+                    entries.append({'event': event, 'name': item.get('statusMessage'), 'enabled': state.get('enabled'),
                                     'trust_record_present': bool(state.get('trusted_hash'))})
     return {'gate_id': GATE_ID, 'registered': len(entries), 'entries': entries,
             'note': 'Trust records alone do not prove the current command is trusted or native callbacks execute.'}

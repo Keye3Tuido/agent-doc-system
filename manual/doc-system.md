@@ -537,6 +537,6 @@ agent 内部同步步骤：
 2. 核验相关源码并按 doc-update 更新文档；没有语义变化时保留正文并记录依据。保留用户已有修改。
 3. `python3 ~/.agent-docs/scripts/doc-workflow.py complete --project <project_root> --source <源码摘要> --reason <源码依据与同步结论>`。脚本核对 inspect 记录、源码未变、当前文档编码和格式，保存完成记录。该命令记录 agent 核验结论，不代表用户批准或程序证明语义正确。
 
-所有条件检查、进度、重复回调和成功记录默认静默。内部反馈只送模型上下文，不设置面向用户的 Hook 状态文案。可恢复问题先自动修复；只有需要用户事实、决策、业务授权或无法恢复的具体问题时才简短说明一次。宿主自己的工具运行界面不由技能隐藏。维护文档系统本身不要求先具备有效项目同步记录。
+每个入口使用稳定唯一名称 `agent-doc-system-silent-workflow/<事件名>`，当前分别为 `agent-doc-system-silent-workflow/PreToolUse`、`agent-doc-system-silent-workflow/PostToolUse`、`agent-doc-system-silent-workflow/Stop`。名称与目录、日期、注册次数无关；重新注册在原位置更新，发现同名入口冲突时拒绝写入。Codex 登记使用 `statusMessage` 保存名称，宿主可能将其显示为运行状态。所有条件检查、进度、重复回调和成功记录的内部反馈只送模型上下文，不播报日常检查或请求确认。可恢复问题先自动修复；只有需要用户事实、决策、业务授权或无法恢复的具体问题时才简短说明一次。宿主自己的工具运行界面不由技能隐藏。维护文档系统本身不要求先具备有效项目同步记录。
 
 当前宿主使用 Codex 时，运行 `python3 ~/.agent-docs/scripts/doc-workflow.py register` 登记三个禁用入口并备份配置；用 `status` 检查登记与启用状态。在宿主的 Hook 管理中审阅并信任当前命令后才能启用；不得自行填写信任摘要。登记、隔离脚本测试、启用和原生回调实测分别报告，不能混为生效证明。原生实测直接使用当前会话，不要求新建或绑定专用会话；执行结果以实际触发、同步及收尾续跑为准。事件摘要位于 Git 目录的 `agent-docs-workflow/observations.jsonl`，检查与完成记录同目录，均不进入业务文件。

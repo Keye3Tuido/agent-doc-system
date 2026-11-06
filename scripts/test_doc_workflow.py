@@ -90,14 +90,27 @@ class Workflow(unittest.TestCase):
         self.git('rm', '-r', '.agent-docs')
         self.assertEqual(self.event('Stop'), {})
 
-    def test_silent_registration_preserves_other_hook_positions(self):
+    def test_named_registration_preserves_other_hook_positions(self):
         config = {'hooks': {'PreToolUse': [{'hooks': [{'type': 'command', 'statusMessage': 'other', 'command': 'other'}]}]}}
         updated = self.m.registration(config)
         self.assertEqual(updated['hooks']['PreToolUse'][0], config['hooks']['PreToolUse'][0])
         self.assertEqual(updated, self.m.registration(updated))
         own = [h for gs in updated['hooks'].values() for g in gs for h in g['hooks'] if self.m.owned(h)]
         self.assertEqual(len(own), 3)
-        self.assertTrue(all(not h.get('statusMessage') for h in own))
+        labels = {event: next(h['statusMessage'] for g in updated['hooks'][event]
+                             for h in g['hooks'] if self.m.owned(h))
+                  for event in ('PreToolUse', 'PostToolUse', 'Stop')}
+        self.assertEqual(labels, {'PreToolUse': 'agent-doc-system-silent-workflow/PreToolUse',
+                                  'PostToolUse': 'agent-doc-system-silent-workflow/PostToolUse',
+                                  'Stop': 'agent-doc-system-silent-workflow/Stop'})
+
+    def test_registration_refuses_foreign_name_collision_without_modifying_input(self):
+        name = 'agent-doc-system-silent-workflow/PreToolUse'
+        config = {'hooks': {'Stop': [{'hooks': [{'command': 'foreign', 'statusMessage': name}]}]}}
+        before = json.dumps(config, sort_keys=True)
+        with self.assertRaisesRegex(ValueError, 'Duplicate document hook name'):
+            self.m.registration(config)
+        self.assertEqual(json.dumps(config, sort_keys=True), before)
 
     def test_native_staging_preserves_other_policy_and_does_not_grant_trust(self):
         config = self.root / 'config'
