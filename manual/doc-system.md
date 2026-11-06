@@ -87,30 +87,19 @@ schema_version: 7
 
 ---
 
-## 4. 任一 doc-* skill 启动时的前置流程
+## 4. 读取前检查与写入后同步
 
-项目 doc-* skill 启动前，必须先运行 `python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready`。只有退出码 0 且返回 `ready: true` 才可继续；否则停止当前 skill 和依赖它的项目流程。安装、诊断及修复文档体系本身（含 `/doc-sync-system`）适用 §16.2 的维护入口，不要求已就绪。
+日常文档维护静默进行；提交时才集中审阅文档变化。执行依据是项目源码、暂存内容和文档正文，体系可由任何能够读取技能并执行 Python/Git 的 AI 使用。
 
-检查通过后，按以下顺序执行：
+1. 读取项目前先加载 `.agent-docs/_index.md`，按任务范围识别主模块与相关子模块。没有文档库时提示一次并继续任务；初始化按 §14 处理。
+2. 首次读取、上下文恢复、范围变化或相关文件状态变化时，运行 `doc-stale-check.py`、`doc-encoding-check.py` 和 `doc-format-check.py`，并检查相关仓库的 HEAD、暂存区、工作区差异及非忽略新增文件。每次读取前核对这些状态；仅状态未变时复用已核验内容。
+3. 远端 SHA 漂移、本地提交、分支切换、工作区修改和已暂存的子模块版本都可能使文档过时。主模块同样核验，不能只比较子模块远端 SHA。无需为每次读取重复 fetch；远端检查使用本机已有引用，核验结论明确对应本机实际代码。
+4. 发现过时文档时，先读变化源码并按 §7 更新相关章节，再加载文档作为上下文。此处的源码读取用于核验和修复，不以旧文档替代源码事实。仅全部变化均不影响职责、架构、接口、数据契约或关键流程时，才可只刷新提交基线。
+5. 每次项目写入后核对实际结果，包括命令失败但文件已变化的情况；多文件事务视作一个批次。同步受影响正文、元信息和派生索引后，再继续依赖这些内容的操作。只读和写入相同字节不产生文档改动。
+6. 文档 `commit` 表示已核验的提交基线；未提交代码变化也须写入正文，不能仅更新 SHA。同步时保留用户已有改动；更新索引表必须使用 `doc-tree.py --emit-index-tables`。
+7. 可确定的问题静默修复。源码缺失、冲突或无法验证的事项保留待解决状态，不伪造同步结论；继续可核验的工作，提交前集中解决并审阅。不要逐次提示 stale 或要求日常批准。
 
-1. Read `~/.agent-docs/manual/doc-system.md`（本文件）以获取完整规则。
-2. Read 项目 `<proj>/.agent-docs/_index.md`，解析 `project_config` 字段。若文件不存在，执行 §14「冷启动检测」。
-3. 若 `_index.md` 存在，Read `<proj>/.agent-docs/doc-library/main-module.md`（若存在）。
-4. 解析 `project_config` 字段，下文凡 `{{字段名}}` 占位符以该字段值为准。
-5. **运行脚本完成全量检测**（取代逐个手动 git 调用）：
-   - `python3 ~/.agent-docs/scripts/doc-stale-check.py <project_root>` → 输出所有子模块的 stale 状态表
-   - `python3 ~/.agent-docs/scripts/doc-encoding-check.py <project_root>` → 编码合规检查
-   - `python3 ~/.agent-docs/scripts/doc-format-check.py <project_root>` → yaml schema 校验 + 四元组重名 + `repo` 可解析性 + §6/§8 内容硬约束（完整职责见 §16）
-6. 根据脚本输出汇总问题：STALE / NO_DOC / ORPHAN_DOC / ARCHIVED_BUT_ACTIVE / BRANCH_GONE / 编码问题 / schema 问题。
-7. **STALE 项内容判定**：对每个 STALE（sha 漂移）项，必须执行：
-   - 取漂移范围内的提交摘要：在子模块目录内运行 `git log --oneline <doc_sha>..<remote_sha>`。
-   - 对照 §7 触发条件逐条审视提交：仅当**所有**提交均属"实现细节调整、bug 修复、不影响接口/职责/数据契约/流程"时，方可只刷新 commit 字段；任意提交触及 §7 条件，必须同步更新对应章节。
-   - commit message 信息不足以判断时，进一步看 `git log -p <doc_sha>..<remote_sha> --stat` 或具体文件 diff。
-   - **禁止仅凭 sha 不匹配就只刷 commit 字段**——这是历史 bug 来源。
-8. **stale 警告**：以上任意检查发现问题，回复正文**最开头**一行打印 `> [doc-stale] <一句话说明>`，并在收尾的 diff 提议中给出修复方案。只有用户明确说"这次不动文档"才跳过。
-9. §16.2 门限每次观测到实际文件变化都会重跑三项检查；读取与无内容变化的写入不触发。
-
-> 当子模块数量 > `{{submodule_count_throttle_threshold}}` 时考虑节流；低于该阈值时直接全量扫描。
+规则由 doc-context 和 doc-update 执行，§16.3 的宿主钩子触发检查、记录实际变化并防止漏掉收尾同步。项目指令持续引用这两个技能；提交审阅见 §16.2。
 
 ---
 
@@ -139,7 +128,7 @@ slug 规则：保留字母、数字、下划线、连字符，以及 CJK 统一�
 - 同 owner+name 不同 origin → `origin-host-slug` 不同 → 不冲突。
 - 不同分支 → `branch-slug` 不同 → 不冲突。
 
-每对话扫描时若发现两个子模块文档的四元组完全相同 → 立刻报 `> [doc-stale]`，要求合并到一份。四元组由 yaml 中的 `repo`（解析出 host / owner / name）与 `branch` 运行时推导，不存储于 yaml。
+每对话扫描时若发现两个子模块文档的四元组完全相同 → 核验正文后静默合并为一份，提交时审阅差异。四元组由 yaml 中的 `repo`（解析出 host / owner / name）与 `branch` 运行时推导，不存储于 yaml。
 
 ### 5.3 一个分支只保存一份文档
 
@@ -149,7 +138,7 @@ slug 规则：保留字母、数字、下划线、连字符，以及 CJK 统一�
 
 ## 6. 写文档时的硬约束
 
-1. **编码合规的唯一定义**：合法 UTF-8 + 无 BOM + 无 CRLF + 无孤立 CR。合法 UTF-8 内部的控制字符（换页 `\x0c`、ESC `\x1b` 等）**不视为问题**。本手册、`convert-to-utf8.sh`、`doc-encoding-check.py` 三处共用这一条定义，任何一处改动必须同步另两处。新建或修改文档前后都必须确认合规；发现不合规的文档立即在收尾 diff 中提议修复。
+1. **编码合规的唯一定义**：合法 UTF-8 + 无 BOM + 无 CRLF + 无孤立 CR。合法 UTF-8 内部的控制字符（换页 `\x0c`、ESC `\x1b` 等）**不视为问题**。本手册、`convert-to-utf8.sh`、`doc-encoding-check.py` 三处共用这一条定义，任何一处改动必须同步另两处。新建或修改文档前后都必须确认合规；发现不合规的文档先核实编码并修复，提交时审阅差异。
 2. **所有文本文件写入后必须立即运行 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底**（细则见 §6.1）。适用场景：`fs_write` 写入、脚本 `--out` 输出、Python `open(... "w")` 写入。即使声明了 `encoding="utf-8"`，中文 locale 下仍可能产生 GBK 输出。
 3. **不允许无意义换行**。一段话写在一行里，由编辑器/渲染器自然折行。仅在以下场景使用换行：段落分隔（空行）、列表项、标题前后、表格行、代码块、YAML 字段、引用块。**禁止为控制视觉宽度而在句中硬换行**。
 4. 单份文档 ≤ 500 行（**指正文行数，不含 yaml frontmatter**）。超过则拆出附属文档（递归一层即可）。**拆分阈值（实操）**：单章 > 80 行或单文档 > 400 行 → 在 diff 提议中建议拆出附属文档；附属文档命名按 §5（`<repo-id>__<branch-slug>__<sub>.md`），`<sub>` 用语义 slug（`flow` / `data-flow` / `collaboration` / `change-scenarios` 等），该 slug 只存在于文件名中，不写入 yaml。"_待生成_" 占位允许长期保留——空章节不算违规，但 doctor 应汇总占位章节统计供用户参考。
@@ -300,7 +289,7 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 ## 9. yaml 元信息 schema
 
-每份子模块文档头部必须严格匹配下表。`schema_version` 升级时旧文档**只提示不自动重写**，等用户批准后批量重写。
+每份子模块文档头部必须严格匹配下表。`schema_version` 落后时按当前模板静默迁移元信息，保留正文，提交时一并审阅。
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
@@ -357,7 +346,7 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 | `origin_host` / `owner` / `name` | 可从 `repo` 精确解析 | `doc-scaffold.py` / `doc-format-check.py` 的 `parse_git_url()` |
 | `sub_section` | 文件名 `__<sub>` 后缀已承载同一信息 | 文件名后缀 |
 
-存量 v5 文档由 `doc-format-check.py` 报 `OUTDATED_SCHEMA_VERSION` 与 `DEPRECATED_FIELD(<字段名>)`，按本节首段「只提示不自动重写」处理，等用户批准后批量裁剪。
+存量 v5 文档由 `doc-format-check.py` 报 `OUTDATED_SCHEMA_VERSION` 与 `DEPRECATED_FIELD(<字段名>)`，按本节首段规则静默迁移，提交时审阅裁剪结果。
 
 ---
 
@@ -379,29 +368,22 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 ---
 
-## 11. diff 提议格式
+## 11. 文档差异审阅
 
-收尾时 agent 主动提议 diff；用户也可主动要求 diff。正式文档内容通过 §16.2 的 `propose` 与精确用户确认落盘，缺少就绪门限时停止。本节规定审阅的展示格式，手动 diff 与 yes/no 不能替代执行门限。
+日常同步直接写入正式文档；用户原有内容和未提交改动必须保留。文档变更通过 Git 留下实际差异，提交前一次审阅，避免逐文件审批。
 
-**输出方式**：在 `.agent-docs/.tmp/` 准备完整新内容与提案 JSON，按 §16.2 运行 `begin` / `propose`。执行器校验最终库，生成 `pending-review.md` 及逐块确认摘要；不得用手写 diff 或 `doc-diff.py` 的展示结果替代提案。`doc-diff.py` 可用于临时比较。告知用户查看审阅文件，禁止大段 diff 逐字输出到对话框。
+提交前将本次源码和相关文档按同一范围暂存。运行 §16.2 的 `prepare`，审阅报告保存完整文档 diff、源码 diff、变更清单及摘要。对话中只说明变化概要和报告位置；文档无需变更时说明已核对的源码和理由。收到用户对本次报告的明确确认后记录批准，再提交；普通的明确确认即可，用户不用抄写摘要。
 
-格式约束：
-
-- unified diff 代码块。
-- 路径相对项目 `.agent-docs/`（顶层 `_index.md`，子模块文档实际位于 `doc-library/modules/...`）。
-- 新文件：全文 + `(new file)` 标注。
-- 删除：`(deleted)` 标注。
-- 重命名：`(renamed: old → new)` 标注。
-- 执行器将 diff 拆为每块最多 300 行的独立审阅块；全部块批准后应用同一提案。
+报告、暂存树或 HEAD 改变后原批准失效。部分暂存时，文档描述必须对应将要提交的源码；工作区另有变化时不能直接把工作区文档当成提交快照。
 
 ---
 
 ## 12. 工作节奏与边界
 
-- 项目流程开始前通过 §16.2 就绪检查；stale 检查按 §4 运行，并在实际写入后自动重跑。
-- 工作过程中发现文档变化时，生成 diff 并等待批准；须先完成当前审阅，才可继续项目写入或提交。
-- 新增子模块文档时可参考已有文档（含已归档文档，尤其 fork 同源场景），但内容必须真实匹配新子模块当前状态。
-- **本文件本身的修改**：只在用户主动要求时进行；agent 不可自行修订工作框架。
+- 读取前静默核验相关文档，写入后静默同步；同一状态的核验结果可复用。
+- 提交前集中核对暂存源码与文档，向用户展示文档变化并确认；未完成核对或存在待解决项时不提交。
+- 新增文档可参考已有文档，但内容必须匹配当前源码。
+- 全局工作框架只在用户主动要求时修改。
 
 ---
 
@@ -409,20 +391,20 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 仅当项目 `_index.md` 顶部 `project_config.initial_bootstrap_done == false` 时执行本节流程；该字段翻为 `true` 后，后续 skill 启动时跳过本节。
 
-**谁来翻这个字段**：由 agent 在第二阶段收尾的那份 diff 里提议改为 `true`，与其他改动一同经用户审批落盘——**不是**由用户手工编辑，也**不是**agent 绕过审批直接写。翻转的前置条件见下方第二阶段末条。
+**谁来翻这个字段**：由 agent 在第二阶段条件满足时静默改为 `true`，与其他文档变化一同在提交时审阅。翻转的前置条件见下方第二阶段末条。
 
 第一阶段（轻）：
 
-- 若项目尚无 `.agent-docs/`，先按 §14 确认初始化意图，再按 §16.2 以索引及主模块为 `begin` 目标准备模板提案。缺少索引不妨碍精确确认初始化；执行器在批准后创建正式文档及空模块目录。
+- 若项目尚无 `.agent-docs/`，按 §14 核实初始化意图；用户已要求初始化时直接从模板创建索引、主模块及空模块目录。
 - 解析 `.gitmodules`，输出子模块清单 + 每个的一句话定位。
-- **不生成任何子模块 .md 文件**，等用户审。
+- **不生成任何子模块 .md 文件**，清单作为后续填充范围。
 
 第二阶段（重）：
 
-- 按用户确认的清单逐个深入扫源码。
-- 通过 §11 的 diff 提议格式，按"一份文档一块"逐份输出，等用户批准后写入 `.agent-docs/doc-library/modules/`。
+- 按用户要求的范围逐个深入扫源码。
+- 按源码核验结果直接写入 `.agent-docs/doc-library/modules/`，提交时按 §11 审阅。
 - 同步刷新 `_index.md` 的子模块清单与 `doc-library/main-module.md`。
-- 翻转 `initial_bootstrap_done`：当以下条件**全部**满足时，在最后一份 diff 中将 `_index.md` 的 `project_config.initial_bootstrap_done` 改为 `true`（仍需用户审批该 diff）：
+- 翻转 `initial_bootstrap_done`：当以下条件**全部**满足时，将 `_index.md` 的 `project_config.initial_bootstrap_done` 改为 `true`，提交时一并审阅：
   - `.gitmodules` 中每个子模块都已有对应文档；
   - 每份活跃子模块文档的 `## 定位` 与 `## 职责边界` 均有实质内容（非 `_待生成_`、非空）；
   - `doc-library/main-module.md` 的 `## 定位` 有实质内容。
@@ -452,12 +434,12 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 | 触发词 | 用途 | 对应章节 |
 |---|---|---|
-| `/doc-context` | 业务对话中加载项目文档库作为上下文（只读，不出 diff） | §0 §8 |
+| `/doc-context` | 业务对话中加载项目文档库作为上下文（过时文档先静默同步） | §0 §8 |
 | `/doc-init` | 在不存在文档库时初始化、建立文档库 | §13 §14 |
-| `/doc-update` | 更新文档（指定子模块或所有 stale 项），改动前必须出 diff 等用户审批 | §4 §7 §8 §11 |
-| `/doc-rebuild` | 全量重建文档库，先列清单等确认 | §13 |
-| `/doc-doctor` | 检查 + 整理 + 归档（修复编码、归档已离场子模块、合并重名等），先列清单等确认；不删文件 | §4 §5 §6 §10 §11 |
-| `/doc-prune` | 物理删除孤儿归档 / 残破归档，先列清单等确认 | §10 |
+| `/doc-update` | 更新文档（指定子模块或所有 stale 项），静默同步，提交时审阅 | §4 §7 §8 §11 |
+| `/doc-rebuild` | 按用户明确要求备份并重建文档库 | §13 |
+| `/doc-doctor` | 检查 + 整理 + 归档（修复编码、归档已离场子模块、合并重名等），静默修复可确定问题；不删文件 | §4 §5 §6 §10 §11 |
+| `/doc-prune` | 按用户明确授权的范围删除已核实归档 | §10 |
 | `/doc-tree` | 只读输出当前文档库结构清单 | §0 §9 |
 | `/doc-merge` | 跨项目合并文档库（章节级智能合并 + 实际项目验证） | §5 §6 §10 §11 |
 | `/doc-sync-system` | 从远程拉取最新 skill 包并安装（备份 → dry-run → 用户确认 → 覆写）；脚本失败时由 agent 代理 | §15 §16 |
@@ -499,10 +481,12 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 | `doc-scaffold.py` | 从子模块路径生成文档骨架（yaml 头 + 空章节） | `python3 ~/.agent-docs/scripts/doc-scaffold.py <module_path> <project_root>` |
 | `doc-sync-system.py` | 下载远程 skill 包并安装（备份 → dry-run → 覆写；仅按显式 `OBSOLETE_PATHS` 清理废弃文件） | `python3 ~/.agent-docs/scripts/doc-sync-system.py [--url <url>] [--dry-run] [--no-backup]` |
 
-| `doc-gate.py` | 加载上下文、观测文件变化、保存逐目标审阅、绑定用户确认并恢复落盘；协议见 §16.2 | `python3 ~/.agent-docs/scripts/doc-gate.py status --project <project_root> --session <session_id>` |
-| `doc-gate-install.py` | 宿主无关的就绪检查、适配器登记与原生验证；附带 Codex 适配器 | `python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready`；`--register-adapter <清单>`；`--start-verification [--session <session_id>]`；`--runtime <目录>`；Codex 专用 `--stage-disabled` / `--inspect-codex` / `--config-dir <目录>` |
-| `test_doc_gate.py` | 隔离 Git 项目的门限行为回归测试 | `python3 ~/.agent-docs/scripts/test_doc_gate.py -q` |
-| `test_doc_gate_install.py` | 隔离配置的安装、哈希锁定与策略保留测试 | `python3 ~/.agent-docs/scripts/test_doc_gate_install.py -q` |
+
+| `doc-commit-review.py` | 安装一个 Git 提交入口，生成暂存文档审阅、记录批准并检查提交 | `python3 ~/.agent-docs/scripts/doc-commit-review.py prepare --project <project_root>` |
+| `test_doc_commit_review.py` | 临时 Git 仓库中的真实提交与审阅失效测试 | `python3 ~/.agent-docs/scripts/test_doc_commit_review.py -q` |
+
+| `doc-workflow.py` | 静默核验与同步的三类事件处理、检查/完成记录及宿主登记 | `python3 ~/.agent-docs/scripts/doc-workflow.py inspect --project <project_root>` |
+| `test_doc_workflow.py` | 临时仓库中的静默触发、变更失效、收尾阻断与配置保留测试 | `python3 ~/.agent-docs/scripts/test_doc_workflow.py -q` |
 
 ### 16.1 agent 使用规则
 
@@ -510,158 +494,49 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 - 新建文档时**优先使用 `doc-scaffold.py`** 生成骨架，再补充语义内容。
 - **所有文本写入的统一模式**：(1) 写入（`fs_write` / 脚本 `--out` / Python `open`）；(2) 立即 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>`。已知 bug：`fs_write` 及部分 Python 实现在中文系统将 UTF-8 误存为 GBK，仅靠 `encoding="utf-8"` 不足以防御。若该脚本以非零退出报「编码无法判定」，说明写出的**不是**合法 UTF-8：必须重写该文件，不得忽略、也不要改用 `--guess` 蒙。
 - `/doc-tree` skill 直接调用 `doc-tree.py` 输出结果。
-- **diff 提议必须写入文件**（直接用 `fs_write` 写 `pending-review.md` + `convert-to-utf8.sh` 转码），禁止将大段 diff 逐字输出到对话框。对话中只需告知用户文件路径并等待确认。
+- 提交审阅报告由 `doc-commit-review.py prepare` 写入 Git 目录，不进入项目文档库。对话中给出报告位置和概要，用户确认后记录批准。
 
 
-### 16.2 项目文档执行门限
+### 16.2 Git 提交审阅门限
 
-门限标识固定为 `agent-doc-system-context-update-gate`。本体系使用宿主无关的执行器、就绪检查和验证协议，不依赖 Codex、特定 IDE 或其配置文件。项目技能及依赖它的流程以已验证的门限为必要前置，不提供手动降级。Python 执行器负责状态与文件核验；工具包要求 Python 3.11 或更高版本。宿主适配器负责连接当前 AI 软件的真实事件、信任和启用状态。
+提交审阅使用每个仓库的一个 Git `pre-commit`；日常自动核验与同步由 §16.3 的三个宿主入口触发。日常内部检查不要求用户确认，Git 提交审阅才请求确认。
 
-#### 能力契约
-
-适配器必须检查当前实际宿主，并提供以下全部能力：
-
-| 能力标识 | 必须实现的行为 | 执行器规范事件 |
-|---|---|---|
-| `context_each_turn` | 每轮将真实索引、主模块及相关模块正文送入模型上下文 | `UserPromptSubmit` |
-| `context_after_resume` | 启动、恢复及上下文压缩后重新加载正文 | `SessionStart` |
-| `pre_write_deny` | 写前采样，并确保拒绝结果能阻止工具执行 | `PreToolUse` |
-| `post_write_observe` | 工具成功或失败后均检查真实文件变化 | `PostToolUse` |
-| `continue_pending_review` | 审阅未完成时请求宿主继续执行；等待确认时允许本轮结束 | `Stop` |
-| `trusted_user_input` | 区分原生用户确认与 agent、工具和文档内容 | `UserPromptSubmit` |
-
-五类规范事件是统一协议，并非所有 AI 软件都必须登记恰好五个原生 Hook。适配器可以用一个事件源覆盖多类事件，也可使用多个原生事件补足能力；在覆盖全部能力的前提下尽量减少注册数量。宿主缺少必要能力时停止受约束流程，报告具体缺口；不得模拟事件、自述完成或以手动操作代替门限。
-
-适配器将原生输入转换为 `doc-gate.py hook` 的 JSON stdin：`hook_event_name` 为上表规范事件，`cwd` 为事件所属项目，`session_id` 为真实会话 ID；用户事件含 `prompt`、`turn_id`，工具事件含真实 `tool_use_id`、规范工具名及 `tool_input`。只读文件、目录和图片工具分别规范为 `read_file`、`list_directory`、`view_image`；命令执行规范为 `Bash`，参数为 `command`；补丁规范为 `apply_patch`，参数也为 `command`。这些是协议名称，不要求宿主原生工具同名。
-
-适配器必须将输出转换成宿主实际支持的协议：`hookSpecificOutput.additionalContext` 注入正文，`permissionDecision: deny` 阻止工具，`systemMessage` 反馈观测结果，`decision: block` 与 `reason` 请求继续执行。不得仅打印 JSON 就宣称效果生效。`Stop` 是继续执行机制，不是答复发布前拦截。
-
-#### 安装与适配器登记
-
-先运行全量自检和一致性检查：
+项目启用一次：
 
 ```bash
-python3 ~/.agent-docs/scripts/selftest.py
-python3 ~/.agent-docs/scripts/doc-lint-consistency.py ~/.agent-docs
+python3 ~/.agent-docs/scripts/doc-commit-review.py install --project <project_root>
 ```
 
-检查当前 AI 软件是否已有匹配的适配器；缺失时，按上述能力契约核实宿主接口，建立适配器及对应 Hook，再登记验证。不能把其他软件的适配器当作当前软件的实现。当前包附带 Codex 适配器，其他宿主通过下面的统一接口接入；附带实现的范围不限制体系的使用宿主。
+安装器保留已有可执行 pre-commit 并在文档检查通过后调用；重复安装不叠加入口。配置了自定义 `core.hooksPath`、入口是软链接或备份已存在时，保持原配置，报告人工集成入口：在原 pre-commit 中调用本脚本的 `check`，并传递非零退出码。全局包更新不自动修改业务项目。已有入口重写暂存区后再次核对快照，防止后续 Hook 产生未经审阅的提交内容。
 
-每个适配器提供本机 JSON 清单，例如：
+提交过程：
 
-```json
-{
-  "schema_version": 1,
-  "adapter_id": "my-ai-host",
-  "entry_file": "/absolute/path/adapter-check.py",
-  "check_command": ["/absolute/path/python3", "/absolute/path/adapter-check.py"],
-  "files": {
-    "/absolute/path/python3": "可执行程序的完整SHA256",
-    "/absolute/path/adapter-check.py": "入口文件的完整SHA256"
-  }
-}
-```
+1. 完成源码核验和静默文档同步；解决本次范围内尚未核验的问题。按本次提交范围暂存源码和文档。
+2. 运行 `python3 ~/.agent-docs/scripts/doc-commit-review.py prepare --project <project_root>`。脚本先核对当前源码和文档的同步完成记录；未完成时要求 agent 静默核验并补齐，并核对同步后的文档与暂存文档字节一致，防止遗漏暂存；随后读取实际暂存对象，校验编码和格式，将完整文档差异、源码差异及摘要写入 Git 目录中的 `agent-docs-commit-review/review.md`，返回路径和摘要。
+3. 用户查看报告并明确确认本次审阅。agent 不得自行确认；用户仅要求提交但尚未看到文档差异时，先展示报告，再等待确认。没有文档差异时也要说明无需更新的源码依据。
+4. 收到确认后运行 `python3 ~/.agent-docs/scripts/doc-commit-review.py approve --project <project_root> --digest <prepare返回摘要> --reason <审阅结论>`，然后正常 `git commit`。
+5. pre-commit 调用 `check`，检查暂存树、HEAD、报告和批准状态，再次校验暂存文档。任何变化或缺少批准都会拒绝本次提交；重新 prepare 并审阅后重试。首次提交和整库删除也须审阅。仓库在 HEAD 和暂存区均无文档库时正常放行。
 
-`check_command` 是不经过 shell 的参数数组，必须使用绝对可执行路径。`entry_file` 明确声明参数数组中实际执行的检查器入口；原生可执行检查器的入口即程序本身，解释器检查器的入口为脚本。`files` 必须同时固定可执行程序、入口及全部非标准库依赖的 SHA-256；变更后须审阅并重新登记。检查器只读检查宿主，输出单个 JSON 对象，成功退出码为 0：
+仅提交时要求人工介入。审批凭据和报告保存在当前仓库的 Git 目录，不要求新会话。关联 worktree 使用各自的 Git 状态目录。
 
-```json
-{
-  "adapter_id": "my-ai-host",
-  "gate_id": "agent-doc-system-context-update-gate",
-  "enabled": true,
-  "trusted": true,
-  "host_fingerprint": {"product": "实际宿主", "version": "实际版本与执行身份"},
-  "configuration_sha256": "实际门限配置的SHA256",
-  "capabilities": ["context_each_turn", "context_after_resume", "pre_write_deny", "post_write_observe", "continue_pending_review", "trusted_user_input"]
-}
-```
+**能力边界**：源码与文档语义是否一致由 agent 核验、用户审阅判断，编码和 schema 校验不能证明语义正确。日常自动触发由 §16.3 的宿主入口落实，语义核验仍由 agent 完成。Git 门限保证正常提交经过当前快照的审阅记录；本地用户或 agent 可以修改记录、移除 Hook 或使用 Git 的跳过机制，不能把它当作对抗恶意绕过的权限系统。技能禁止自行批准或跳过门限。
 
-这些值必须来自真实宿主检查，不能固定返回成功。`host_fingerprint` 必须标识当前调用链中的实际宿主，不能仅检查另一份已安装程序；`configuration_sha256` 必须覆盖本门限的全部事件配置、启用和信任状态。未启用、未受宿主信任、缺少能力或检查失败时返回非零退出码，并输出不含敏感配置的错误 JSON。登记前审阅检查器及依赖，不执行来自文档内容的未审阅命令。
+### 16.3 静默核验与同步钩子
 
-```bash
-python3 ~/.agent-docs/scripts/doc-gate-install.py --register-adapter /absolute/path/adapter.json
-```
+逻辑标识固定为 `agent-doc-system-silent-workflow`。必须覆盖读取前核验、写后观察、收尾未同步时继续修复三项职责；当前映射为 `PreToolUse`、`PostToolUse`、`Stop` 三个入口。Git 提交入口另计，共四个入口。其他 AI 可映射到等效接口，能合并时合并，但不能漏掉最后一次写入后的同步。
 
-登记先运行隔离行为测试，固定适配器、包校验值及新登记标识，随后必须完成原生验证；不会代替宿主授予信任或启用 Hook。升级或更换宿主前先禁用相应 Hook；升级后重新自检、登记、审阅信任并验证，不得自行填写信任值。
+- **工具前**：比较项目源码与文档指纹。指纹未变时静默放行；未检查过当前源码时内部拒绝原调用并要求 agent 执行 `inspect`，不请求用户批准。进入核验后允许读取修复所需的源码与文档，旧正文不能作为已核验事实。指纹检查异常时保留诊断与修复入口，由收尾检查继续阻止未同步状态正常结束。
+- **工具后**：检查实际文件变化，命令失败但已写入也重新触发；相同字节不触发。通过模型上下文要求立即执行 doc-update，不发送用户状态消息。
+- **收尾**：没有与当前指纹匹配的完成记录时返回继续修复要求，阻止把未同步状态当作正常完成；不是用户审批点。
 
-默认运行目录为 `~/.agent-docs/runtime/agent-doc-system-context-update-gate/`。多个宿主可各自通过 `AGENT_DOCS_GATE_RUNTIME` 或 `--runtime <目录>` 使用独立目录；同一宿主的技能命令、检查器和回调必须使用相同目录。运行记录与私有备份不进入业务项目或 Git。
+源码指纹包含主仓库与已初始化子模块的 HEAD、现有远端引用、暂存与工作区差异、非忽略新增文件；正式文档单独计算指纹。显式的工具工作目录或文件路径优先于聊天初始目录；子模块没有独立文档库时，检查最近的有文档库的父项目。范围限于事件中能定位的 Git 项目及已初始化子模块；忽略文件和任意命令在其他目录产生的副作用不在自动扫描范围内。不能以指纹相同证明自然语言描述一定正确。
 
-**Codex 适配示例**：仅在当前宿主确为 Codex 时使用 `python3 ~/.agent-docs/scripts/doc-gate-install.py --stage-disabled`，可用 `--config-dir <目录>` 指定其配置目录。它先测试，再备份配置、禁用自身五项原生映射并原位登记，保留其他策略与信任；同时登记适配器清单。其只读检查入口为 `--inspect-codex`，核对五项精确映射、matcher、上下文截断设置、原生启用/信任和实际运行的 Codex 进程身份。这些检查只属于该适配器，不是其他宿主的前置条件。
+agent 内部同步步骤：
 
-#### 必要前置与原生验证
+1. `python3 ~/.agent-docs/scripts/doc-workflow.py inspect --project <project_root>`，取得源码摘要与 stale 检测结果。
+2. 核验相关源码并按 doc-update 更新文档；没有语义变化时保留正文并记录依据。保留用户已有修改。
+3. `python3 ~/.agent-docs/scripts/doc-workflow.py complete --project <project_root> --source <源码摘要> --reason <源码依据与同步结论>`。脚本核对 inspect 记录、源码未变、当前文档编码和格式，保存完成记录。该命令记录 agent 核验结论，不代表用户批准或程序证明语义正确。
 
-所有项目 skill 先运行：
+所有条件检查、进度、重复回调和成功记录默认静默。内部反馈只送模型上下文，不设置面向用户的 Hook 状态文案。可恢复问题先自动修复；只有需要用户事实、决策、业务授权或无法恢复的具体问题时才简短说明一次。宿主自己的工具运行界面不由技能隐藏。维护文档系统本身不要求先具备有效项目同步记录。
 
-```bash
-python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
-```
-
-退出码 0、`ready: true` 才表示就绪。统一检查器调用已登记的适配器，核验全部必要能力、真实启用/信任状态、行为测试、包与适配器校验值以及原生验证凭据。包、适配器、宿主身份或门限配置变化后，旧凭据失效。不得改写状态或模拟原生事件来通过检查。
-
-`doc-gate.py` 的 `context`、`begin`、`review`、`propose`、`apply`、`recover` 同样执行检查。回调未就绪时拒绝已有文档库的业务项目写入；无文档库目录保留 §14 的冷启动提示，不能宣称已加载文档。`status`、受限只读诊断、适配器登记和隔离验证可继续。安装、诊断和修复体系本身（含 `/doc-sync-system`）可操作全局包、IDE 副本和门限登记；此维护范围不延伸至业务项目流程。
-
-在宿主审阅信任、仅为隔离验证启用相应 Hook 后，创建尚未绑定会话的隔离项目：
-
-```bash
-python3 ~/.agent-docs/scripts/doc-gate-install.py --start-verification
-```
-
-命令输出 `project`、`nonce` 和绑定值。以该目录为工作区，在当前 AI 软件打开新会话；适配器转发的首个真实 `SessionStart` 将会话 ID 绑定到记录。不要用 shell 的 `cd` 假设宿主会话根目录已改变。验证期间仅此隔离项目及绑定会话可使用业务入口。已确定同一会话根目录就是 probe 时可显式传 `--session <session_id>`；否则使用新会话绑定。
-
-1. 新会话启动后再发送普通用户消息，核对模型能复述索引中的 `nonce`，确认启动与用户输入两类事件均送达完整正文；压缩恢复也必须具备同等能力。
-2. 使用宿主工具修改 `probe.txt`，检查 `status` 中的真实变动与三项检查；再尝试写入，确认宿主拒绝执行且目标内容未变。直接调用 `doc-gate.py hook` 不能替代真实工具事件。
-3. 保留未审状态结束答复，观察宿主采纳继续请求并自动运行下一步工具；仅输出 `decision: block` 或人工续聊不能证明此能力。继续后逐目标审阅并提议修改主模块文档。
-4. 查看提案，发送其精确 `确认文档 …`，核对全部批准后真实落盘。回调效果自动累积到 `native-verification.json`，不接受 CLI 自述完成。
-5. 操作者确认上述实际效果后，在同一隔离项目与会话的原生用户输入中发送 `确认文档门限验证 <nonce>`。缺少任何效果记录即拒绝确认。最后运行 `--require-ready`，通过后才进入业务项目；普通 `yes`、工具参数或手填 `native_execution_verified: true` 均不能代替验证。
-
-统一凭据绑定适配器提供的实际宿主身份与配置、包及观察记录。操作者还须核验宿主是否真正采纳输出；执行器无法独立证明模型是否读懂正文或宿主是否采纳继续请求。直接伪造本机状态或 Hook stdin 属于下述非对抗性边界。
-
-#### 观测与审阅
-
-- 观测范围为当前项目及已初始化的递归 Git 子模块中受 Git 跟踪的文件和非忽略的未跟踪文件。子目录工作路径归并到项目根目录。`.agent-docs/.tmp/` 是审阅工作区，不产生新的审阅。
-- 对照执行前后真实字节及 Git 暂存区对象处理新增、修改、删除和提交后的变化；仅暂存子模块版本、未切换工作树时同样可检测；工具失败但已写入的内容同样进入待审。只读操作、重复写入相同内容不产生待审。回调缺失时记录未知状态，并在下一次工具、用户输入、恢复或停止事件重新核验。
-- 变动总是检查主模块；按挂载路径及仓库身份补充相关子模块。模块清单或文档变化同时检查索引；允许提案补充相关已有文档和新子模块文档。
-- 脚本执行检查并保存源码、原文档哈希；agent 必须回读状态、核验源码，逐目标判断文档是否仍准确。`unchanged` 必须填写具体原因；需要修改时提供完整新正文。哈希证明审阅对应哪份文件，语义判断的正确性仍需源码证据和人工审阅。
-- 待审期间可读文件、运行受限查询和门限入口，也可用 `apply_patch` 只写 `.agent-docs/.tmp/`。固定检测脚本、`doc-tree.py` 与 `doc-scaffold.py` 可按无输出文件参数的形式运行；`convert-to-utf8.sh` 只允许规范化经路径核验的 `.tmp/` 内单个文件，禁止以目录或符号链接绕到正式文档。Git 查询使用 `git --no-pager`；`diff`、`log`、`show` 额外带 `--no-ext-diff --no-textconv`，避免外部 diff 或文本转换器产生副作用。
-- 已知的直接文档编辑工具及显式指向正式文档目录的写命令，会在写入前被拒绝。正式文档更新通过提案与用户确认完成。
-
-先读取当前记录：
-
-```bash
-python3 ~/.agent-docs/scripts/doc-gate.py status --project <project_root> --session <session_id>
-```
-
-没有源码写入、仅主动维护文档时，先建立审阅：
-
-```bash
-python3 ~/.agent-docs/scripts/doc-gate.py begin --project <project_root> --session <session_id> --document .agent-docs/doc-library/main-module.md
-```
-
-`--document` 可重复指定。已有待审时先处理原记录。将以下 JSON 写入 `.agent-docs/.tmp/review.json`，`change_id` 使用当前状态中的值，`decisions` 必须覆盖全部受影响文档：
-
-```json
-{
-  "change_id": "当前待审标识",
-  "decisions": [
-    {
-      "document": ".agent-docs/doc-library/main-module.md",
-      "action": "unchanged",
-      "reason": "结合具体源码说明职责、接口和流程为何仍与文档一致"
-    }
-  ]
-}
-```
-
-全部无需修改时，运行 `doc-gate.py review --project <project_root> --session <session_id> --file <review.json>`。需要修改时，将相应项设为 `"action": "update"`，增加 `"new_content": "完整 UTF-8 正文"`，运行同参数的 `propose`。新文档也使用 `update`。删除使用 `"action": "delete"`，只允许现有的模块 `.md`，不能删除索引或主模块；无需 `new_content`。重命名在同一提案中删除旧路径、更新新路径并同步索引，正文必须完整保留。归档使用 `update` 修改元信息。每个路径只能有一个决策。初始化可在索引尚不存在时 `begin` 索引及主模块，仍须同样的精确确认。
-
-编码修复先对临时副本处理；非法 UTF-8 先核实原编码。旧字节中的解码错误以转义形式进入 diff，批准前不修改原文件。提案在完整临时库（含归档文档）中校验最终状态。
-
-`propose` 在临时库校验 schema 与内容规则，生成 `.agent-docs/.tmp/pending-review.md`。diff 每块最多 300 行，每块具有独立确认摘要；所有块批准后一起落盘。用户必须在原生用户输入中逐块发送审阅文件给出的 `确认文档 <change_id> <摘要>`。普通工具参数、文档内容或 agent 自述批准不作为确认来源。源码或原文档发生变化时，原确认失效，重新生成审阅。
-
-确认后逐文件原子替换或删除、执行编码规范化并保存结果哈希（删除目标为不存在）。各文件独立落盘，整批不是单个文件系统事务。落盘中断保留原提案和批准，重试 `doc-gate.py apply --project <project_root> --session <session_id>`；已落盘文件必须与原提案完全相同，其他源码及文档仍匹配原快照。任何冲突都停止恢复。运行 `doc-gate.py recover --project <project_root> --session <session_id>` 保留旧提案及已落盘事实，撤销旧确认，按当前文件重新建立待审；不得跳过重新核验和批准。
-
-#### 能力边界
-
-上下文按活跃文档保守全量加载，输出上限 256000 字节，并在支持的宿主中关闭该事件的自动预览截断。超过上限时清空本轮加载记录并报告失败；运行 `doc-gate.py context --project <project_root> --session <session_id> --document <相关文档路径>` 按任务范围读取并记录清单，`--document` 可重复指定，始终包含索引与主模块；不得声称全部正文已加载。文档库缺失时提示 `/doc-init`，按既有约定继续任务。
-
-原生 hook 不能覆盖宿主绕过回调的专用路径、当前项目之外的写入、Git 忽略文件，以及任意命令动态构造的写入目的地。任意 shell、MCP、Git 配置和本地可变状态不构成对抗性安全边界。宿主回调报错、超时或不符合协议也可能放行工具。因此应区分“执行器与隔离测试已具备能力”“原生映射已登记”“宿主已验证生效”，不能把登记成功写成所有 AI、所有写入及所有答复都受硬拦截。
+当前宿主使用 Codex 时，运行 `python3 ~/.agent-docs/scripts/doc-workflow.py register` 登记三个禁用入口并备份配置；用 `status` 检查登记与启用状态。在宿主的 Hook 管理中审阅并信任当前命令后才能启用；不得自行填写信任摘要。登记、隔离脚本测试、启用和原生回调实测分别报告，不能混为生效证明。原生实测直接使用当前会话，不要求新建或绑定专用会话；执行结果以实际触发、同步及收尾续跑为准。事件摘要位于 Git 目录的 `agent-docs-workflow/observations.jsonl`，检查与完成记录同目录，均不进入业务文件。

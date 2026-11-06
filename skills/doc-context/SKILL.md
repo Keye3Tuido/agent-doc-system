@@ -1,29 +1,22 @@
 ---
 name: doc-context
-description: "Load project documentation library as context before answering questions about code structure, module boundaries, submodule functionality, cross-module calls, architecture, bug investigation, or new feature design. Call this skill whenever the user's request requires understanding the project's documented structure."
+description: "Before reading project code or documentation, silently check freshness, synchronize outdated documentation from verified source, and load the relevant project context. Reuse verified content only while its source and documentation remain unchanged."
 ---
 
-> 本 skill 是轻量上下文加载器，只读不写、不做文档管理，因此**不需要加载全局手册**。下文出现的 `§n` 仅作为「规则出处」备注，供人工追溯，执行时无需为此去读手册。
+> 每次读取项目代码或文档前静默执行。文档过时则先按 doc-update 同步，再将正文作为上下文。日常维护直接落盘，文档差异留到提交时审阅；规则见手册 §4、§11、§16.2。
 
-## 必要前置
+## 静默钩子协作
 
-执行本 skill 前必须运行：
+使用前检查当前 AI 宿主是否已登记并启用 `agent-doc-system-silent-workflow` 的读取前、写后和收尾职责；当前 Codex 用 `doc-workflow.py status` 检查，缺失时按手册 §16.3 登记并在宿主审阅，其他 AI 使用等效事件。安装与维护本体系可以继续，不因门限未启用而锁死修复。钩子的条件和进度只送内部上下文，不向用户播报或索要日常批准。
 
-```bash
-python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
-```
+收到内部同步要求时运行 `doc-workflow.py inspect --project <project_root>`，核验相关源码并同步文档后，用返回的 source 摘要运行 `complete --source <摘要> --reason <源码依据与同步结论>`。该完成记录由 agent 保存，不是用户确认。源文件再变或文档被修改后重新核验，未同步时不得正常结束；提交审阅仍按手册 §16.2 请求用户确认。
 
-只有退出码为 0 且返回 `ready: true` 才能继续。适配器或映射缺失、禁用、缺少宿主信任、能力不足、包或宿主变化、原生验证未完成时，停止本 skill 及依赖它的项目流程，报告检查结果，按手册 §16.2 核实当前 AI 软件的能力、建立或修复对应适配器与 Hook，完成验证后重试；体系不绑定 Codex，不能用其他宿主的适配器代替当前宿主；不得改走手动执行或把隔离脚本测试当作宿主验证。安装、诊断和修复文档体系本身可继续，范围不延伸至业务项目操作。
+## 读取前检查
 
-## 门限协作
-
-检查通过后，复用当前轮 `UserPromptSubmit` 或压缩后 `SessionStart` 注入的真实正文；没有本轮加载记录时运行：
-
-```bash
-python3 ~/.agent-docs/scripts/doc-gate.py context --project <project_root> --session <宿主真实会话ID>
-```
-
-命令返回实际正文并保存对应文件哈希。全量正文超限时，根据索引选择相关模块，追加可重复的 `--document <项目相对文档路径>`；索引与主模块始终加载，记录只代表所选范围。下面的读取步骤用于选择范围、补充正文和核验已加载内容，不能替代就绪检查。门限安装、能力检查和范围见手册 §16.2，仅在处理这些事项时加载该节。
+- 首次读取、上下文压缩恢复、任务范围变化，或相关代码/文档的 HEAD、暂存区、工作区内容变化时，运行 `python3 ~/.agent-docs/scripts/doc-stale-check.py <project_root>`，并核对相关主仓库与子模块的 `git diff`、`git diff --cached`、非忽略新增文件。远端 SHA 相同不能证明工作区内容未变。
+- 后续每次读取前核对上述状态；仅在相关状态与已核验内容相同的情况下复用。发现漂移时先读变化源码，按 doc-update 更新相关章节，再使用文档回答；源码读取是修复过时文档所必需的核验。禁止把旧正文当成已核验事实。
+- 缺少源码、子模块未初始化、远端不可达或冲突导致无法同步时，继续完成可核验部分，明确未知事实；保留待解决项，在提交审阅时报告，不逐次请求审批。
+- 检查与更新静默进行，不打印日常 stale 警告，不要求专用会话绑定，宿主入口按上述规则检查。
 
 ## 执行步骤
 
@@ -60,6 +53,6 @@ python3 ~/.agent-docs/scripts/doc-gate.py context --project <project_root> --ses
 
 ## 硬约束
 
-- 项目文档只读，不生成 diff；门限入口仅保存本机运行记录。
+- 只修改本次读取所需、已核验过时的文档；同步调用 doc-update 的内容规则。
 - 文档库不存在时不阻断对话——打印提示后正常作答。
 - 同一对话中复用仍适用的正文；压缩恢复、文档内容或任务涉及的模块变化后重新加载。不得把正文加载失败或被截断的预览记为已完整加载。

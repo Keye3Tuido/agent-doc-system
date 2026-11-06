@@ -14,7 +14,7 @@ project_config:
 >
 > 顶部 `project_config` 是当前项目的耦合配置。全局 `doc-system.md` 中的 `{{字段名}}` 占位符均指向本块字段。
 >
-> 本文件由 agent 在每次结构性变动（新增 / 归档 / 重命名 / 合并子模块）后**提议** diff，由用户审批后落库。日常 sha 漂移不触发本文件的修改，只触发 `doc-library/modules/` 下对应文档的 commit 字段刷新。
+> 本文件由 agent 在结构性变动后静默同步；两张子模块表通过 doc-tree.py --emit-index-tables 再生。提交时统一审阅文档差异。日常 SHA 漂移只更新对应模块文档，未影响清单或定位时不改索引。
 >
 > 下方「活跃子模块」与「归档子模块」两张表是**派生视图**，唯一事实源是各文档自身的 yaml frontmatter 与 `## 定位` 章节。**不要手工维护这两张表**，用脚本再生：`python3 ~/.agent-docs/scripts/doc-tree.py <project_root> --emit-index-tables`。
 

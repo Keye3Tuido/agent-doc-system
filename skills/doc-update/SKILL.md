@@ -1,31 +1,27 @@
 ---
 name: doc-update
-description: "Update existing documentation files for one or all submodules in the current project, including refreshing commit SHA, filling in architecture / key flows / interfaces / data contracts, and reorganizing chapters. Always outputs a unified diff and waits for user approval before writing. Use when the user asks to update, refresh, sync, or fill in module documentation."
+description: "Update existing documentation files for one or all submodules in the current project, including refreshing commit SHA, filling in architecture / key flows / interfaces / data contracts, and reorganizing chapters. Silently synchronize affected documentation after project writes and before using outdated context; require documentation review only at Git commit time. Use when the user asks to update, refresh, sync, or fill in module documentation."
 ---
 
 > 本 skill 是全局 `~/.agent-docs/manual/doc-system.md` 的执行入口，对应章节：§4（每对话流程，含 STALE 内容判定）+ §7（更新触发条件）+ §8（文档模板）+ §11（diff 提议格式）+ §16（工具脚本）。完整规则以手册为准，本文件只列执行步骤，不复述规则。
 
-## 必要前置
+## 静默钩子协作
 
-执行本 skill 前必须运行：
+使用前检查当前 AI 宿主是否已登记并启用 `agent-doc-system-silent-workflow` 的读取前、写后和收尾职责；当前 Codex 用 `doc-workflow.py status` 检查，缺失时按手册 §16.3 登记并在宿主审阅，其他 AI 使用等效事件。安装与维护本体系可以继续，不因门限未启用而锁死修复。钩子的条件和进度只送内部上下文，不向用户播报或索要日常批准。
 
-```bash
-python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
-```
-
-只有退出码为 0 且返回 `ready: true` 才能继续。适配器或映射缺失、禁用、缺少宿主信任、能力不足、包或宿主变化、原生验证未完成时，停止本 skill 及依赖它的项目流程，报告检查结果，按手册 §16.2 核实当前 AI 软件的能力、建立或修复对应适配器与 Hook，完成验证后重试；体系不绑定 Codex，不能用其他宿主的适配器代替当前宿主；不得改走手动执行或把隔离脚本测试当作宿主验证。安装、诊断和修复文档体系本身可继续，范围不延伸至业务项目操作。
-
-## 门限协作
-
-就绪检查通过后，按手册 §16.2：回读 `doc-gate.py status` 中的待审、三项检查结果及文件哈希，再完成下面的源码核验。实际写入已自动触发检查；只读与无内容变化的写入不产生待审。
-
-没有源码变更、用户主动要求更新文档时，用 `doc-gate.py begin --project <project_root> --session <宿主真实会话ID> --document <项目相对文档路径>` 建立审阅。阶段 B 只准备新内容；正式落盘由阶段 C 的门限确认执行。门限未就绪时停止；草稿、工具参数和 agent 自述都不能代替原生用户确认。
+收到内部同步要求时运行 `doc-workflow.py inspect --project <project_root>`，核验相关源码并同步文档后，用返回的 source 摘要运行 `complete --source <摘要> --reason <源码依据与同步结论>`。该完成记录由 agent 保存，不是用户确认。源文件再变或文档被修改后重新核验，未同步时不得正常结束；提交审阅仍按手册 §16.2 请求用户确认。
 
 ## 触发形式
 
 - `/doc-update`：扫所有 stale 文档（含主模块 + 全部子模块）。
 - `/doc-update <module-path>`：仅处理指定子模块（如 `Libraries/code_sandsort`）。
 - `/doc-update main`：仅处理主模块文档（`doc-library/main-module.md`）。
+
+## 自动调用范围
+
+读取前发现过时内容或项目写入后，按本次实际变化路径选择主模块、相关子模块及受影响的协作章节，直接进入阶段 B。包括已暂存但未切换工作树的子模块版本、本地提交、工作区及新增文件；不能只等远端 SHA 漂移才更新。文档库已存在但相关模块缺文档时，核验后补建骨架和正文。使用本次已核验的范围，避免每次写入都全库扫描。
+
+文档自身写入后只校验该文档和受影响的派生索引，不递归触发同一同步流程。已有源码变化不影响文档语义时保留正文，将核验依据留待提交审阅。
 
 ## 执行步骤
 
@@ -69,7 +65,7 @@ python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
    - 若文档缺少`schema_version`字段，添加为手册当前版本并按上述流程补全
    - **冗余字段清理**：子模块与附属文档对照手册 §9；`doc-library/main-module.md` 只保留模板定义的 `schema_version`；`_index.md` 保留模板定义的 `schema_version` 与完整 `project_config`。删除各自白名单之外的顶层键及其子键，保持文档瘦身；**不得把 `_index.md.project_config` 当作冗余字段删除**。
 3. 若文档状态为 `ARCHIVED_BUT_ACTIVE`：去掉 `archived` / `archived_at` / `archived_reason` 字段，将其从 `_index.md` 归档区移回活跃区。
-4. **STALE 内容判定**（按手册 §4 第 6 条；仅 stale 目标走此步）：在子模块目录内执行 `git log --oneline <doc_sha>..<remote_sha>`，对照 §7 触发条件逐条审视：
+4. **STALE 内容判定**（按手册 §4；仅 stale 目标走此步）：先确定本次实际核验基线。本地与远端一致时取 `origin/<branch>`；本地领先、分支切换时取实际 HEAD；只暂存子模块版本时核验将提交的 gitlink 对象。比较文档基线与目标提交的日志和 diff，同时检查暂存、工作区及新增文件，按 §7 触发条件逐条审视：
    - 仅当**所有**提交均属"实现细节调整 / bug 修复 / 不影响接口/职责/数据契约/流程"时，方可只刷新 `commit` 字段。
    - 任意提交触及 §7 条件，必须对应章节同步更新；commit message 信息不足时进一步看 `git log -p <doc_sha>..<remote_sha> --stat` 或具体文件 diff。
    - **禁止仅凭 sha 不匹配就只刷 commit 字段**。
@@ -92,20 +88,20 @@ python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
 7. 若该文档还是首次落地骨架（章节为空或仅占位），按当前掌握的信息补充对应章节。
 8. 同步刷新元信息中的 `commit` 字段（子模块文档；粒度候选不刷 commit，因为代码未变）。
 9. 新建文档时使用 `python3 ~/.agent-docs/scripts/doc-scaffold.py <module_path> <project_root>` 生成骨架。
-10. 准备文档草稿：将新内容写入 `.agent-docs/.tmp/`，正式路径在阶段 C 获批后落盘。每次写草稿后立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（默认模式修 BOM / CRLF / 孤立 CR；非 UTF-8 会拒绝改动并非零退出）。
+10. 将已核验的新内容直接写入对应正式文档；复用本次任务已有写入授权，不逐份请求批准。每次写入后立即调用 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>` 兜底（默认模式修 BOM / CRLF / 孤立 CR；非 UTF-8 会拒绝改动并非零退出）。
 
-### 阶段 C：输出与审批
+### 阶段 C：静默同步与提交审阅
 
-1. 检查 `_index.md` 的 `project_config.initial_bootstrap_done`：为 `false` 且手册 §13 的三项前置条件全部满足时，将翻为 `true` 的改动纳入同一提案；条件不满足时保持原值。
-2. 按手册 §16.2 为全部受影响文档生成 JSON 决定；无需改动时使用 `review` 并说明源码依据，需要改动时使用 `propose`。新文档和相关索引也放入同一提案。
-3. 告知用户查看 `.agent-docs/.tmp/pending-review.md` 并逐块发送文件中的精确确认。对话中说明改动概要，禁止逐字输出大段 diff。
-4. 全部摘要经原生用户输入核验后落盘。落盘中断先 `apply`，冲突则 `recover` 撤销旧确认、保留已落盘事实并重新审阅。
+1. 每次项目写入后，包括命令失败但已产生文件变化时，核对受影响主模块和子模块的职责、架构、接口、数据契约、关键流程及索引；需要更新则立即同步，完成后再继续依赖这些内容的操作。多文件事务可作为一个写入批次处理。
+2. `_index.md.project_config.initial_bootstrap_done` 为 `false` 且手册 §13 的三项条件满足时，同步改为 `true`。
+3. 运行编码和格式检查。索引派生表变化时运行 `doc-tree.py --emit-index-tables` 再生对应两节。静默修复可确定的问题，保留无法核实的事项，不伪造已同步状态。
+4. 提交前核对实际暂存源码与文档，运行手册 §16.2 的 `prepare`，向用户展示文档差异或无需更新的依据，收到本次审阅的明确确认后再 `approve` 和提交。日常写入不等待这一步。
 
 ## 硬约束
 
-- 永远不要静默写文件。每一份要变的文档都必须出现在 diff 中。
+- 日常文档维护静默落盘；提交时统一审阅实际暂存差异。用户已有文档改动必须保留，冲突处先核验，不能用整份覆盖抹掉。
 - 主模块文档与子模块文档同等对待，不可遗漏。
-- sha 必须从 `origin/<branch>` 取（远端），不用本地 HEAD（除非远端引用不存在）。
+- `commit` 记录实际已核验的提交基线，本地与远端一致时取 `origin/<branch>`，本地领先或分支切换时取实际 HEAD。未提交变化也须同步正文，不能仅刷新 SHA 声称已同步。
 - 收尾时若子模块清单或一句话定位有变化，**不要手工改 `_index.md` 的两张表**——跑 `python3 ~/.agent-docs/scripts/doc-tree.py <project_root> --emit-index-tables` 再生后替换对应两节，并纳入同一份 diff。
 - 遵守 §6 第 5、6 条：只描述当前状态（禁止"修复了 X"、"以前是 Y"这类补丁式叙述）、不复制实现细节、不写行号、不写具体常数。这四项由 `doc-format-check.py` 的 `PATCH_NARRATIVE` / `LINE_NUMBER_REF` 部分覆盖。
 - 粒度补充须以 agent 本次对话中**实际读过**的源码为依据，禁止凭推测扩写文档。

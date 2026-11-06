@@ -18,10 +18,15 @@ import argparse
 import os
 import shutil
 import sys
+from datetime import datetime
 
 AGENT_DOCS_HOME = os.path.expanduser("~/.agent-docs")
 TARGETS = ("manual", "scripts", "skills", "templates", "installers")
 ROOT_FILES = ("urls.conf", "README.md")  # 根目录下需要安装的单文件
+RETIRED_FILES = (
+    "scripts/doc-gate.py", "scripts/doc-gate-install.py",
+    "scripts/test_doc_gate.py", "scripts/test_doc_gate_install.py",
+)
 
 
 def collect_source_files(src_root):
@@ -140,6 +145,16 @@ def main():
             dp = os.path.join(AGENT_DOCS_HOME, rel)
             purged.append(dp)
 
+    # Upgrades retire only these owned files; preserve custom scripts and runtime.
+    retired = []
+    if args.upgrade:
+        for rel in RETIRED_FILES:
+            dp = os.path.join(AGENT_DOCS_HOME, rel)
+            if os.path.isfile(dp) and not os.path.exists(os.path.join(src_root, rel)):
+                retired.append(dp)
+                if dp not in purged:
+                    purged.append(dp)
+
     for label, items in [("ADD", added), ("REPLACE", replaced), ("PURGE", purged), ("SKIP", skipped)]:
         for item in items:
             path = item if isinstance(item, str) else item[1]
@@ -148,6 +163,14 @@ def main():
     if args.dry_run:
         print("[dry-run] no files written")
         return 0
+
+    if retired:
+        backup = os.path.join(AGENT_DOCS_HOME, '.backup', 'retired-hooks-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
+        for dp in retired:
+            saved = os.path.join(backup, os.path.relpath(dp, AGENT_DOCS_HOME))
+            os.makedirs(os.path.dirname(saved), exist_ok=True)
+            shutil.copy2(dp, saved)
+        print('Retired scripts backed up to ' + backup)
 
     for sp, dp in added + replaced:
         os.makedirs(os.path.dirname(dp), exist_ok=True)

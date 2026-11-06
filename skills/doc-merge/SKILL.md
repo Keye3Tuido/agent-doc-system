@@ -1,19 +1,9 @@
 ---
 name: doc-merge
-description: "Merge documentation libraries from one or more other projects into the current project's library. Compares same-named docs section by section, verifies each conflicting claim against the current project's actual source code, keeps only what matches reality, and marks foreign-only docs as archived. Always backs up first, lists all proposed actions, and requires user approval before writing. Use when the user asks to merge, combine, import, or sync documentation libraries across projects."
+description: "Merge documentation libraries from one or more other projects into the current project's library. Compares same-named docs section by section, verifies each conflicting claim against the current project's actual source code, keeps only what matches reality, and marks foreign-only docs as archived. Backs up first, applies verified merges silently, and reviews documentation changes at commit time. Use when the user asks to merge, combine, import, or sync documentation libraries across projects."
 ---
 
 > 本 skill 是全局 `~/.agent-docs/manual/doc-system.md` 的执行入口，对应章节：§5（命名/冲突）+ §6（写文档约束）+ §9（yaml schema）+ §10（archived 流程）+ §11（diff 提议格式）+ §16（工具脚本）。完整规则以手册为准，本文件只列执行步骤，不复述规则。
-
-## 必要前置
-
-执行本 skill 前必须运行：
-
-```bash
-python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
-```
-
-只有退出码为 0 且返回 `ready: true` 才能继续。适配器或映射缺失、禁用、缺少宿主信任、能力不足、包或宿主变化、原生验证未完成时，停止本 skill 及依赖它的项目流程，报告检查结果，按手册 §16.2 核实当前 AI 软件的能力、建立或修复对应适配器与 Hook，完成验证后重试；体系不绑定 Codex，不能用其他宿主的适配器代替当前宿主；不得改走手动执行或把隔离脚本测试当作宿主验证。安装、诊断和修复文档体系本身可继续，范围不延伸至业务项目操作。
 
 ## 触发形式
 
@@ -39,7 +29,7 @@ python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
 
 - **A. 外部独有 + 当前 .gitmodules 含该仓库**：当前项目缺该文档，但仓库在挂载列表里 → 作为活跃文档引入。
   - 仓库在但分支不同：分支文档可共存（每分支一份），按新文档处理。
-- **B. 外部独有 + 当前 .gitmodules 不含该仓库**：仓库不在挂载列表 → **询问用户**：(1) 标记 `archived: true` + `archived_reason: imported-from-other-project` + `archived_at: <ISO 日期>` 引入；(2) 跳过；(3) 自定义处理。**不自动引入**。这是你"当前项目没这个模块也没这个文档时让用户选择"的场景。
+- **B. 外部独有 + 当前 .gitmodules 不含该仓库**：仓库不在挂载列表 → 用户已指定处理方式时照其选择执行；否则保留为待决项，提交时询问：(1) 标记 `archived: true` + `archived_reason: imported-from-other-project` + `archived_at: <ISO 日期>` 引入；(2) 跳过；(3) 自定义处理。**不自动引入**。这是你"当前项目没这个模块也没这个文档时让用户选择"的场景。
 - **C. 同主键重叠（当前项目有该文档）**：按"章节级实际项目验证合并"处理（见阶段 2）。所有外部副本统一参与比对，不再多源裁决。
 - **D. 多源外部独有**：多个外部路径都有同主键文档但当前项目没有 → 与 B 类合并询问，让用户选择保留哪个外部副本（或全部跳过）。
 
@@ -81,39 +71,21 @@ python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
 **yaml 头部处理**：
 
 - 保留当前项目原有 yaml 字段。
-- `commit` 字段**重读当前项目对应子模块的远端 sha**（`git -C <module> rev-parse origin/<branch>`），不沿用旧值。
+- `commit` 字段记录当前项目实际已核验的提交基线：本地与远端一致时取 `origin/<branch>`，本地领先或分支切换时取实际 HEAD；暂存与工作区变化也须核验，不沿用外来副本的值。
 - 外部副本若带 v7 之前的 `structure` 字段，**一律删除**，不沿用也不重新提取——该字段已废弃。
 - 外部 yaml 头部一律忽略。
 
-### 阶段 3：清单确认
+### 阶段 3：静默合并
 
-把阶段 1 + 2 的候选与来源写入 `.agent-docs/.tmp/merge-candidates.md`，列出 A 类引入、B 类选择、C 类章节合并依据、D 类多源选择及备份位置。请用户明确 B/D 类裁决（如 `B1=1 D1=keep=path-a`）；未裁决项保持待选，不擅自默认处理。此阶段是内容选择，不授权正式写入。
-
-### 阶段 4：提案 + 同步
-
-1. 根据裁决在 `.agent-docs/.tmp/` 准备全部合并和新增文档，并再生索引表。保留 `project_config`，不修改主模块；检查归档字段齐全。
-2. 按 §16.2 运行 `begin` 指定受影响目标；用完整 `decisions` 和 `new_content` 运行 `propose`，让执行器生成最终 `.agent-docs/.tmp/pending-review.md`。不覆盖执行器生成的审阅文件。
-3. 告知用户概要与审阅路径，要求逐块发送精确 `确认文档 <change_id> <摘要>`。B/D 裁决和普通 yes 不能替代确认。
-4. 全部确认后由执行器写入并规范编码，核验最终结果与索引。
-
-### 阶段 5：副本处理
-
-合并成功 → 询问"是否删除备份 `.agent-docs/.tmp/merge-backup-<timestamp>/`？回复 yes 删除。"用户回复 yes 才物理删除；其他回答保留备份。
-
-合并失败或取消时保留备份和已落盘事实。未完成的提案按 §16.2 使用 `apply` 或 `recover`；需要从备份恢复正式文档时，重新核验并生成恢复提案（含需删除的新增模块），经全部精确确认后执行，不能直接拷回。
+1. 按已核验源码和用户已有裁决更新文档；B/D 类未裁决的项保留为待决，不擅自引入。保留 `project_config`，不修改主模块，归档字段必须齐全。
+2. 保留用户已有改动，逐章合并，再生索引两张派生表，运行编码和格式检查。
+3. 收尾汇总结果与备份路径；提交时按手册 §16.2 统一审阅实际差异和待决项。
+4. 保留备份，用户明确要求清理时再删除。失败时核对实际落盘结果，从备份逐项恢复，不能覆盖用户或并发改动。
 
 ## 硬约束
 
-- 正式文档操作只接受执行器绑定当前提案的精确用户确认。备份位于临时目录，其清理可按阶段 5 单独确认。
-- **绝不动外部项目的 `.agent-docs/`**。本 skill 对外部路径只读。
-- **绝不修改当前项目 `_index.md.project_config`**。这是身份信息。
-- **绝不修改 `doc-library/main-module.md`**。主模块不参与跨项目合并。
-- **B 类、D 类必须经用户裁决**，agent 不得擅自决定。
-- 章节级合并时，每个差异点必须有明确的"实际项目验证"动作（读源码、读配置、读 .gitmodules），不能凭推测。
-- 写文件强制 UTF-8 / 无 BOM / LF / 无句中硬换行。
-- 最终 diff 必须由 `propose` 生成，禁止把大段 diff 逐字输出到对话。
-- diff 每块最多 300 行，由执行器拆分并逐块绑定确认。
-
-## 失败回滚
-
-阶段 4 落盘出错时停止，保留提案、已批准记录与部分文件，报告错误位置及当前状态，按 §16.2 核验后恢复。
+- 外部项目只读。
+- 不修改当前项目的 `project_config` 和主模块文档。
+- 每个合并差异必须有源码、配置或模块清单依据；经验类章节按手册规则处理。
+- 无法核验或缺少用户裁决的项保持原样，提交时明确说明。
+- 全程 UTF-8、无 BOM、LF；日常落盘不另行审批。

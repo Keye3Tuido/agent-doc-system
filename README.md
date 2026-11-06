@@ -2,7 +2,7 @@
 
 基于项目的 git submodule 结构自动构建文档库，描述各模块的职责与架构。以远程 URL、仓库、分支作为文档划分依据；以文档内容与实际代码是否一致、远端 commit sha 与文档记录是否一致作为更新依据。
 
-系统由技能、检测脚本和项目文档库组成，可在支持技能或读取 SKILL.md 的 AI 环境中使用。项目流程以经过验证的执行门限为必要前置；统一协议通过宿主适配器接入，目前附带 Codex 实现，在实际文件变化后运行检查并保存审阅状态；其他宿主需适配和验证原生事件。能力范围见手册 §16.2。
+系统由技能、检测脚本和项目文档库组成，可在能读取 SKILL.md 并执行 Python 3.11+ 和 Git 的 AI 环境中使用。读取前静默检查相关文档，写入后静默同步；只有提交时集中审阅文档变化。日常流程由三个宿主入口触发技能，提交门限使用一个 Git pre-commit；其他 AI 按等效事件接入。
 
 ## 安装
 
@@ -24,31 +24,15 @@ python3 agent-doc-system/installers/install-global.py --upgrade --skills-target 
 
 仅同步包内 doc-* 的 SKILL.md，保留其他技能及附加文件。升级后对比全局包和实际 IDE 文件，避免运行旧副本。
 
-### 必须完成：宿主能力适配与门限验证
-
-本体系的执行器、就绪检查和验证协议独立于 AI 软件。当前宿主的适配器必须覆盖每轮与压缩恢复后的正文注入、写前拒绝、写后观测、待审继续执行及真实用户确认。Hook 注册数量由宿主能力决定，在完整覆盖的前提下尽量减少。
-
-项目技能开始前必须运行：
+### 项目提交门限（每个仓库安装一次）
 
 ```bash
-python3 ~/.agent-docs/scripts/doc-gate-install.py --require-ready
+python3 ~/.agent-docs/scripts/doc-commit-review.py install --project <project_root>
 ```
 
-仅退出码 0 且返回 `ready: true` 才可继续。适配器缺失、禁用、未受信任、能力不足或验证未完成时，停止受约束流程，不降级为手动执行。安装、诊断和修复体系本身可继续。
+该命令只安装一个 Git pre-commit，保留已有入口。静默核验与同步另需三个宿主入口，见下文。项目指令持续引用 doc-context（读取前检查）与 doc-update（写后同步）。已有自定义 hooksPath 时按提示集成到原入口。
 
-检查当前宿主是否已有适配器，缺失时按手册 §16.2 的统一契约建立本机检查器和对应 Hook，使用 `--register-adapter <清单>` 登记，再执行 `--start-verification` 完成隔离原生验证。普通软件不因能读取 SKILL.md 就自动具备 Hook 能力。
-
-包内附带 **Codex 适配器**：仅在 Codex 中使用以下命令登记五项禁用映射：
-
-```bash
-python3 ~/.agent-docs/scripts/selftest.py
-python3 ~/.agent-docs/scripts/doc-lint-consistency.py ~/.agent-docs
-python3 ~/.agent-docs/scripts/doc-gate-install.py --stage-disabled
-```
-
-经宿主审阅、信任后，仅为隔离验证启用；统一验证通过后才用于业务项目。其他宿主使用各自适配器，不读取或依赖 Codex 配置。
-
-项目文档提案按文件哈希绑定，每块 diff 经原生用户输入精确确认后落盘，中断可恢复。观测限于当前项目及已初始化子模块中的 Git 跟踪文件与非忽略新文件；回调绕过或失败放行仍属能力边界，`Stop` 只能请求继续执行。完整协议、适配器清单、确认方式及限制见手册 §16.2。
+日常文档同步直接落盘。提交前运行 `doc-commit-review.py prepare --project <project_root>`，展示报告，用户确认本次文档审阅后运行 `approve --project <project_root> --digest <摘要> --reason <结论>`，再正常提交。暂存内容、HEAD 或报告变化后须重新审阅；用户不用抄写摘要。完整步骤与能力边界见手册 §16.2。
 
 ### 第二步：为各 IDE 安装 skill
 
@@ -148,6 +132,8 @@ done
    - **软链接方式**（如 Claude Code、Kiro、DeepSeek、Cursor、VSCode/Copilot）：无需额外操作，自动生效。
    - **复制方式**：检测变更并提示用户确认后覆盖更新。
 
+升级旧版本前，从宿主移除旧文档系统的 Hook 注册；其他策略保持原样。新版使用 §16.3 的三个静默入口，登记后在宿主中审阅并启用；不要求专用会话绑定。
+
 ### 方式二：手动运行脚本
 
 ```bash
@@ -160,12 +146,12 @@ python3 ~/.agent-docs/installers/install-global.py --upgrade --purge
 
 | 指令 | 用途 |
 |---|---|
-| `/doc-context` | 加载索引、主模块及相关模块正文；支持原生事件注入和加载记录 |
+| `/doc-context` | 加载索引、主模块及相关模块正文；读取前静默检查与同步 |
 | `/doc-init` | 初始化新项目的文档库（第一阶段：扫子模块出清单） |
-| `/doc-update [module]` | 更新文档。sha 漂移检测 → 内容刷新 → diff 审批 → 落盘 |
+| `/doc-update [module]` | 更新文档。源码核验 → 静默同步 → 提交时审阅 |
 | `/doc-doctor` | 健康检查：编码/schema/命名/归档/冗余字段/章节缺失 |
-| `/doc-rebuild` | 全量重建文档库，先列清单等确认 |
-| `/doc-prune` | 物理删除孤儿归档文档，先列清单等确认 |
+| `/doc-rebuild` | 按用户明确要求备份并重建文档库 |
+| `/doc-prune` | 按明确授权范围删除已核实归档 |
 | `/doc-merge <path>` | 跨项目合并文档库，章节级验证 + 实际代码对账 |
 | `/doc-tree` | 只读输出文档库结构树 |
 | `/doc-sync-system` | 拉取最新 skill 包并安装，脚本失败时 agent 代理 |
@@ -176,7 +162,7 @@ python3 ~/.agent-docs/installers/install-global.py --upgrade --purge
 agent-doc-system/
 ├── README.md
 ├── urls.conf
-├── manual/doc-system.md     # 全局操作手册（含门限协议）
+├── manual/doc-system.md     # 全局操作手册（含静默维护与提交审阅流程）
 ├── scripts/                 # 工具脚本与行为测试
 ├── skills/                  # 9 个 doc-* skill
 ├── installers/install-global.py
@@ -205,3 +191,9 @@ agent-doc-system/
 将 `~/.agent-docs/` 整个目录打包拷贝到新机器即可（含 `manual/`、`scripts/`、`skills/`、`templates/`、`installers/`和`urls.conf`）。
 
 项目文档库不在全局配置中，各项目独立维护。
+
+## 静默核验与同步入口
+
+当前 Codex 宿主运行 `python3 ~/.agent-docs/scripts/doc-workflow.py register`，登记读前、写后、收尾三个禁用入口，再在宿主 Hook 管理中审阅并启用。其他 AI 按手册 §16.3 映射等效事件。入口唯一标识为 `agent-doc-system-silent-workflow`，不依赖旧适配器或专用会话绑定。
+
+正常检查、状态和进度只进入内部记录。过时文档由 agent 核验源码后同步；钩子负责触发、指纹失效及收尾检查，不能证明文档语义正确。日常维护不请求用户批准，提交时才集中审阅。登记和脚本测试不等于宿主已实际启用。

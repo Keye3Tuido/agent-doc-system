@@ -460,10 +460,7 @@ def test_sync_obsolete(tmp):
     src = os.path.join(tmp, "sync-package")
     os.makedirs(os.path.join(home, "scripts"))
     os.makedirs(os.path.join(src, "scripts"))
-    obsolete = [
-        "doc-structure-extract.py",
-        "doc-structure-import.py",
-    ]
+    obsolete = [os.path.basename(p) for p in sync.OBSOLETE_PATHS]
     for name in obsolete + ["custom.py"]:
         with open(os.path.join(home, "scripts", name), "w", encoding="utf-8") as f:
             f.write(name)
@@ -502,7 +499,7 @@ def main():
         test_sync_obsolete(tmp)
         test_lint(tmp)
         test_content_constraints(tmp)
-        for script in ("test_doc_gate.py", "test_doc_gate_install.py"):
+        for script in ("test_doc_commit_review.py", "test_doc_workflow.py"):
             result = subprocess.run([sys.executable, os.path.join(HERE, script), "-q"],
                                     capture_output=True, text=True, timeout=120)
             check(script + " behavioral tests", result.returncode == 0, result.stdout + result.stderr)

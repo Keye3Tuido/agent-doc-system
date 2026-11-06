@@ -180,6 +180,8 @@ class Lint:
         for label, text in self.corpus():
             seen = set()
             for span in re.findall(r"`([^`]+)`", text):
+                if span.startswith('git '):
+                    continue  # Git flags are not package-script flags.
                 for flag in re.findall(r"(?<![-\w])(--[a-z][a-z0-9-]*)", span):
                     if flag in universe or flag in seen:
                         continue

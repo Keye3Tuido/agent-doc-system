@@ -43,6 +43,10 @@ import zipfile
 AGENT_DOCS_HOME = os.path.expanduser("~/.agent-docs")
 TARGETS = ("manual", "scripts", "skills", "templates", "installers", "urls.conf", "README.md")
 OBSOLETE_PATHS = (
+    "scripts/doc-gate.py",
+    "scripts/doc-gate-install.py",
+    "scripts/test_doc_gate.py",
+    "scripts/test_doc_gate_install.py",
     "scripts/doc-structure-extract.py",
     "scripts/doc-structure-import.py",
 )

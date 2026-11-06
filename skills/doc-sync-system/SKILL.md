@@ -16,11 +16,7 @@ description: "Download and install the latest doc-system package (skills + scrip
 
 ### 维护范围
 
-本 skill 安装和修复文档体系本身，可在 Hook 缺失、禁用或未验证时执行。该权限只覆盖全局包、IDE 技能副本、禁用登记和诊断；业务项目的上下文加载、文档维护及依赖流程仍须通过 `doc-gate-install.py --require-ready`。安装完成不代表门限已就绪。
-
-### 门限升级前置检查
-
-若宿主已登记 `agent-doc-system-context-update-gate`，升级前先在宿主禁用该门限；保留其他策略和信任状态。升级后运行全量自检与一致性检查，再按已登记的宿主适配器重新锁定包内容；Codex 使用 `doc-gate-install.py --stage-disabled`，其他宿主更新并用 `--register-adapter` 登记各自清单，不得替换成 Codex 适配器。经宿主审阅并仅在隔离项目启用后，完成手册 §16.2 的原生验证；`--require-ready` 返回 `ready: true` 后才可用于业务项目；不得自动填写信任值或把脚本测试视为原生回调验证。
+安装手册、脚本与技能副本；静默宿主入口按手册 §16.3 检查与更新，不要求专用会话绑定。升级后保留项目已有的 Git 提交门限；全局脚本位置不变时无需重复安装。旧 `agent-doc-system-context-update-gate` 注册必须从宿主移除；新版 `agent-doc-system-silent-workflow` 负责静默核验和同步，其他策略保持原样。
 
 ### 阶段 A：脚本驱动（首选）
 
@@ -35,7 +31,7 @@ description: "Download and install the latest doc-system package (skills + scrip
    ```
 4. 脚本会自动备份当前 `~/.agent-docs/` 的所有内容（skills、scripts、manual、templates、installers、urls.conf、README.md）到 `~/.agent-docs/.backup/<时间戳>/`，然后逐文件覆写，并删除 `OBSOLETE_PATHS` 明确列出的已废弃文件。
 5. 把脚本的安装摘要（含 backup 路径）转给用户。
-6. 安装结束后，**重新加载手册** `~/.agent-docs/manual/doc-system.md`（提醒用户：下一对话起新规则才生效；当前对话内若已加载旧手册可继续按旧规则收尾）。
+6. 安装结束后，**重新加载手册** `~/.agent-docs/manual/doc-system.md`，当前对话立即按新版规则继续。
 
 ### 阶段 B：脚本失败时 agent 代理安装
 
