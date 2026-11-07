@@ -63,6 +63,28 @@ class Workflow(unittest.TestCase):
         self.complete()
         self.assertEqual(self.event('Stop'), {})
 
+    def test_verified_context_loads_once_and_commit_hook_is_automatic(self):
+        self.complete()
+        hook = self.root / '.git/hooks/pre-commit'
+        self.assertTrue(hook.is_file())
+        first = self.event('PreToolUse', tool_name='Bash', tool_input={'command':'cat src.txt'}, tool_use_id='first')
+        self.assertIn('doc-context', first['hookSpecificOutput']['additionalContext'])
+        self.assertIn('测试。', first['hookSpecificOutput']['additionalContext'])
+        self.assertEqual(self.event('PreToolUse', tool_name='Bash', tool_input={'command':'cat src.txt'}, tool_use_id='again'), {})
+        before = hook.read_bytes()
+        self.m.ensure_commit_gate(self.root)
+        self.assertEqual(hook.read_bytes(), before)
+        self.write('src.txt', 'changed')
+        self.git('add', 'src.txt')
+        result = subprocess.run(['git','-C',str(self.root),'commit','-qm','unreviewed'], capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_commit_triggers_doc_update_and_host_tools_do_not_touch_project(self):
+        self.complete()
+        result = self.event('PreToolUse', tool_name='Bash', tool_input={'command':'git commit -m test'}, tool_use_id='commit')
+        self.assertIn('doc-update', result['hookSpecificOutput']['additionalContext'])
+        self.assertEqual(self.event('PreToolUse', tool_name='mcp__codex_app__read_thread', tool_input={}), {})
+
     def test_same_bytes_and_read_only_work_do_not_reopen_sync(self):
         self.complete()
         self.write('src.txt', 'one\n')
@@ -175,6 +197,39 @@ class Workflow(unittest.TestCase):
         (child / 'source').write_text('two')
         self.assertEqual(self.event('Stop')['decision'], 'block')
 
+
+    def test_policy_journal_records_exact_denial_without_message_contents(self):
+        fields={'path':'src.txt'}
+        result=self.event('PreToolUse',tool_name='read_file',tool_input=fields,tool_use_id='blocked-read')
+        rows=[json.loads(line) for line in self.m.state_path(self.root).with_name('observations.jsonl').read_text().splitlines()]
+        receipt=rows[-1]
+        self.assertEqual(receipt['gate_id'],self.m.GATE_ID)
+        self.assertEqual(receipt['decision'],'deny')
+        self.assertEqual(receipt['tool_use_id'],'blocked-read')
+        import hashlib
+        expected=hashlib.sha256(json.dumps(['read_file',fields],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+        self.assertEqual(receipt['action_sha256'],expected)
+        self.assertNotIn('tool_input',receipt)
+
+
+    def test_global_skills_and_exact_tv_control_do_not_depend_on_project_docs(self):
+        import shlex
+        runtime = Path.home() / '.codex/tv/process_gate.py'
+        command = shlex.join(['python3', str(runtime), '--session', 'isolated', '--request', '{"action":"inspect"}'])
+        event = dict(tool_name='Bash', tool_input={'command': command})
+        self.assertEqual(self.event('PreToolUse', **event), {})
+        bad = command + '; cat src.txt'
+        self.assertEqual(self.event('PreToolUse', tool_name='Bash', tool_input={'command':bad})['hookSpecificOutput']['permissionDecision'], 'deny')
+        wrong = command.replace('--session isolated', '--session other')
+        self.assertEqual(self.event('PreToolUse', tool_name='Bash', tool_input={'command':wrong})['hookSpecificOutput']['permissionDecision'], 'deny')
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            skill = home / '.agents/skills/test/SKILL.md'
+            skill.parent.mkdir(parents=True); skill.write_text('test')
+            from unittest.mock import patch
+            with patch.object(self.m.Path, 'home', return_value=home):
+                self.assertEqual(self.event('PreToolUse', tool_name='Bash', tool_input={'command':'cat ' + str(skill)}), {})
+                self.assertEqual(self.event('PreToolUse', tool_name='Bash', tool_input={'command':'cat ' + str(skill) + ' src.txt'})['hookSpecificOutput']['permissionDecision'], 'deny')
 
 if __name__ == '__main__':
     unittest.main()

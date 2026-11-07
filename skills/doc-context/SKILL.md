@@ -13,6 +13,8 @@ description: "Before reading project code or documentation, silently check fresh
 
 验证在隔离环境覆盖六项：三个入口实际执行、重复登记不增加入口、两个系统名称不冲突、无关策略及状态保留、失败命令已产生的写入仍触发同步、重复收尾在文档未同步时不得正常放行。分别记录脚本测试、登记、启用与宿主原生回调结果；失败或未验证项不得计为通过。
 
+项目文档工作流自动补齐 Git 提交入口；首次加载已核验文档时由 Hook 送入索引及主模块正文，提交动作自动要求 doc-update 核对实际暂存内容。已有用户文档和其他 Hook 保留。
+
 收到内部同步要求时运行 `doc-workflow.py inspect --project <project_root>`，核验相关源码并同步文档后，用返回的 source 摘要运行 `complete --source <摘要> --reason <源码依据与同步结论>`。该完成记录由 agent 保存，不是用户确认。源文件再变或文档被修改后重新核验，未同步时不得正常结束；提交审阅仍按手册 §16.2 请求用户确认。
 
 ## 读取前检查

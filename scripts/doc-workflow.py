@@ -3,6 +3,7 @@
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -124,6 +125,7 @@ def complete(root, token, reason):
     if not inspection.exists() or json.loads(inspection.read_text()).get('source') != token:
         raise ValueError('Run inspect before verifying and recording completion.')
     checks(root)
+    ensure_commit_gate(root)
     if fingerprints(root) != (source, documents):
         raise ValueError('Files changed during validation; retry.')
     atomic_json(state_path(root), {'source': source, 'documents': documents, 'reason': reason,
@@ -143,6 +145,29 @@ def instruction(root):
             '随后继续原任务；提交时才集中请求审阅文档差异。')
 
 
+def ensure_commit_gate(root):
+    """Attach the project commit boundary when its document workflow is used."""
+    spec = importlib.util.spec_from_file_location('doc_commit_review', HERE / 'doc-commit-review.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.install(root)
+
+
+def fresh_context(root, event, documents):
+    """Load verified entry documents once per session and document version."""
+    if not event.get('tool_use_id'):
+        return ''
+    path = state_path(root).with_name('loaded-context.json')
+    loaded = json.loads(path.read_text()) if path.exists() else {}
+    session = event.get('session_id')
+    if not session or loaded.get(session) == documents:
+        return ''
+    entries = [root / '.agent-docs/_index.md', root / '.agent-docs/doc-library/main-module.md']
+    body = '\n'.join(str(p) + '\n' + p.read_text() for p in entries if p.is_file())
+    atomic_json(path, {**loaded, session: documents})
+    return ('静默使用 doc-context。以下索引与主模块正文已与当前源码核验；按本次路径继续加载相关子模块正文。\n' + body)
+
+
 def document_owner(path):
     root = project(path)
     if document_files(root):
@@ -156,7 +181,43 @@ def document_owner(path):
     return root
 
 
+
+def project_independent_control(event):
+    """Keep exact workflow controls and global skill reads outside project freshness."""
+    fields = event.get('tool_input') or {}
+    command = fields.get('command', fields.get('cmd', ''))
+    if event.get('tool_name') not in ('Bash', 'bash', 'exec_command', 'shell', 'run_shell_command') or not isinstance(command, str):
+        return False
+    try:
+        args = shlex.split(command)
+    except ValueError:
+        return False
+    if not args or shlex.join(args) != command:
+        return False
+    home = Path.home()
+    if args[0] == 'cat' and len(args) > 1:
+        roots = (home / '.codex/skills', home / '.agents/skills', home / '.agent-docs/manual')
+        return all(Path(p).is_absolute() and Path(p).is_file() and
+                   (any(Path(p).resolve().is_relative_to(r.resolve()) for r in roots) or
+                    Path(p).resolve() == (home / '.codex/tv/README.md').resolve())
+                   for p in args[1:])
+    if len(args) < 3 or not re.fullmatch(r'python(?:3(?:\\.\\d+)?)?', Path(args[0]).name):
+        return False
+    runtime = Path(os.environ.get('CODEX_HOME', str(home / '.codex'))) / 'tv'
+    if Path(args[1]).resolve() == (runtime / 'process_gate.py').resolve():
+        return (args[2:] == ['--status'] or
+                args[2:] == ['--session', event.get('session_id'), '--migrate-state'] or
+                (len(args) == 6 and args[2:5] == ['--session', event.get('session_id'), '--request']
+                 and isinstance(json.loads(args[5]), dict)))
+    if Path(args[1]).resolve() == (runtime / 'host_receipts.py').resolve():
+        return (len(args) == 8 and args[2:5] == ['--session', event.get('session_id'), '--evidence-id']
+                and bool(args[5]) and args[6] == '--receipt-file' and Path(args[7]).is_absolute())
+    return False
+
+
 def event_project(event):
+    if project_independent_control(event):
+        raise ValueError('Workflow control does not target project files')
     fields = event.get('tool_input') or {}
     if isinstance(fields, dict):
         # Respect explicit tool targets instead of forcing the chat's original cwd.
@@ -165,10 +226,12 @@ def event_project(event):
             if isinstance(value, str) and Path(value).is_absolute():
                 target = Path(value)
                 return document_owner(target if target.is_dir() else target.parent)
+    if str(event.get('tool_name', '')).startswith(('mcp__codex_app__', 'mcp__cua_repl')):
+        raise ValueError('Host conversation and settings tools do not target project files')
     return document_owner(event.get('cwd') or '.')
 
 
-def hook(event):
+def _hook(event):
     name = event.get('hook_event_name')
     if name not in EVENTS:
         return {}
@@ -180,17 +243,20 @@ def hook(event):
         return {}
     current = (None, None)
     try:
-        audit = state_path(root).with_name('observations.jsonl')
-        audit.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(audit, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            f.write(json.dumps({'event': name, 'session_id': event.get('session_id'),
-                                'tool_use_id': event.get('tool_use_id'),
-                                'at': datetime.now(timezone.utc).isoformat()}) + '\n')
         current = fingerprints(root)
         path = state_path(root)
         previous = json.loads(path.read_text()) if path.exists() else {}
         if current == (previous.get('source'), previous.get('documents')):
+            if name == 'PreToolUse':
+                ensure_commit_gate(root)
+                context = fresh_context(root, event, current[1])
+                fields = event.get('tool_input') or {}
+                command = fields.get('command', fields.get('cmd', ''))
+                if isinstance(command, str) and re.search(r'\bgit\b.*\bcommit\b', command):
+                    context += ('\n提交前静默使用 doc-update 核对实际暂存源码与文档，按本次范围同步并暂存；'
+                                '运行 doc-commit-review.py prepare，展示文档差异，收到明确确认后 approve 并提交。')
+                if context:
+                    return {'hookSpecificOutput': {'hookEventName': name, 'additionalContext': context}}
             return {}
         context = instruction(root)
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
@@ -209,6 +275,42 @@ def hook(event):
             return {'hookSpecificOutput': {'hookEventName': name, 'permissionDecision': 'deny',
                                           'permissionDecisionReason': context, 'additionalContext': context}}
     return {'hookSpecificOutput': {'hookEventName': name, 'additionalContext': context}}
+
+
+
+def hook(event):
+    result = _hook(event)
+    name = event.get('hook_event_name')
+    if name not in EVENTS:
+        return result
+    try:
+        root = event_project(event)
+        if not document_files(root):
+            return result
+        audit = state_path(root).with_name('observations.jsonl')
+        if audit.is_symlink():
+            raise ValueError('Policy journal must be a regular file.')
+        audit.parent.mkdir(parents=True, exist_ok=True)
+        decision = result.get('hookSpecificOutput', {}).get('permissionDecision')
+        row = {'gate_id': GATE_ID, 'event': name, 'session_id': event.get('session_id'),
+               'tool_use_id': event.get('tool_use_id'),
+               'action_sha256': hashlib.sha256(json.dumps(
+                   [event.get('tool_name'), event.get('tool_input')],
+                   ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
+               'decision': decision or result.get('decision') or 'continue',
+               'at': datetime.now(timezone.utc).isoformat()}
+        context = result.get('hookSpecificOutput', {}).get('additionalContext', '')
+        if 'doc-context' in context and name == 'PreToolUse':
+            row['triggered_skill'] = 'doc-context'
+        if 'doc-update' in context and name in ('PreToolUse', 'PostToolUse'):
+            row['triggered_update'] = 'doc-update'
+        fd = os.open(audit, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            stream.write(json.dumps(row, ensure_ascii=False) + '\n')
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        # Missing audit data never grants permission or invents a tool result.
+        pass
+    return result
 
 
 def owned(entry):
