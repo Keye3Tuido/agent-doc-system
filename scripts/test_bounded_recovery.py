@@ -67,5 +67,23 @@ class BoundedRecovery(unittest.TestCase):
         with patch.object(self.m.Path,'home',return_value=home):
             self.assertEqual(self.m.hook(event),{})
 
+    def test_native_cli_respects_disabled_host_entry_even_if_callback_arrives(self):
+        import subprocess,sys
+        config=(self.root/'host-config').resolve();config.mkdir()
+        hooks=config/'hooks.json'
+        hooks.write_text(json.dumps(self.m.registration({'hooks':{}})))
+        settings=config/'config.toml'
+        identity=str(hooks)+':stop:0:0'
+        event={'hook_event_name':'Stop','cwd':str(self.root),'session_id':'cached-callback'}
+        def call(enabled):
+            settings.write_text('[hooks.state.'+json.dumps(identity)+']\nenabled = '+str(enabled).lower()+'\n')
+            p=subprocess.run([sys.executable,str(self.m.HERE/'doc-workflow.py'),'hook','--config-dir',str(config)],
+                             input=json.dumps(event),text=True,capture_output=True)
+            self.assertEqual(p.returncode,0,p.stderr)
+            return json.loads(p.stdout)
+        self.assertEqual(call(False),{})
+        self.assertFalse(self.m.state_path(self.root).with_name('recovery.json').exists())
+        self.assertEqual(call(True)['decision'],'block')
+
 if __name__=='__main__':unittest.main()
 

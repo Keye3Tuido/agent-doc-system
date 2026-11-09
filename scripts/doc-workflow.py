@@ -468,6 +468,25 @@ def status(config_dir):
             'note': 'Trust records alone do not prove the current command is trusted or native callbacks execute.'}
 
 
+def disabled_by_host(config_dir, event):
+    """Honor an explicit disabled state even if a host forwards an old callback."""
+    hooks_file = config_dir / 'hooks.json'
+    settings = config_dir / 'config.toml'
+    if not hooks_file.is_file() or not settings.is_file():
+        return False
+    data = json.loads(hooks_file.read_text())
+    states = tomllib.loads(settings.read_text()).get('hooks', {}).get('state', {})
+    name = event.get('hook_event_name')
+    key = re.sub(r'(?<!^)(?=[A-Z])', '_', str(name)).lower()
+    for gi, group in enumerate(data.get('hooks', {}).get(name, [])):
+        for hi, entry in enumerate(group.get('hooks', [])):
+            if entry.get('statusMessage') == HOOK_LABELS.get(name):
+                identity = f'{hooks_file}:{key}:{gi}:{hi}'
+                if states.get(identity, {}).get('enabled') is False:
+                    return True
+    return False
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('action', choices=('hook', 'inspect', 'complete', 'register', 'status'))
@@ -478,7 +497,9 @@ def main():
     p.add_argument('--config-dir', default=str(Path.home() / '.codex'))
     args = p.parse_args()
     if args.action == 'hook':
-        print(json.dumps(hook(json.load(sys.stdin)), ensure_ascii=False))
+        event = json.load(sys.stdin)
+        disabled = disabled_by_host(Path(args.config_dir).expanduser().resolve(), event)
+        print(json.dumps({} if disabled else hook(event), ensure_ascii=False))
     elif args.action == 'register':
         print(json.dumps(stage(Path(args.config_dir).expanduser().resolve()), ensure_ascii=False))
     elif args.action == 'status':
