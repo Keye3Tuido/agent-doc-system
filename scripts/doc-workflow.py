@@ -125,11 +125,12 @@ def complete(root, token, reason):
     if not inspection.exists() or json.loads(inspection.read_text()).get('source') != token:
         raise ValueError('Run inspect before verifying and recording completion.')
     checks(root)
-    ensure_commit_gate(root)
+    commit_gate = ensure_commit_gate(root)
     if fingerprints(root) != (source, documents):
         raise ValueError('Files changed during validation; retry.')
     atomic_json(state_path(root), {'source': source, 'documents': documents, 'reason': reason,
-                                 'at': datetime.now(timezone.utc).isoformat()})
+                                 'at': datetime.now(timezone.utc).isoformat(), 'commit_gate': commit_gate})
+    recovery_record(root)
 
 
 def instruction(root):
@@ -150,7 +151,10 @@ def ensure_commit_gate(root):
     spec = importlib.util.spec_from_file_location('doc_commit_review', HERE / 'doc-commit-review.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.install(root)
+    try:
+        return module.install(root)
+    except module.IntegrationRequired as exc:
+        return {'installed': False, 'status': 'needs_integration', 'reason': str(exc)}
 
 
 def fresh_context(root, event, documents):
@@ -182,6 +186,49 @@ def document_owner(path):
 
 
 
+def recovery_record(root, event=None, context=None):
+    """Bound automatic Stop repair; preserve freshness and commit enforcement."""
+    path = state_path(root).with_name('recovery.json')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix('.lock').open('a+b') as lock:
+        if os.name == 'nt':
+            import msvcrt
+            if lock.tell() == 0:
+                lock.write(b'0'); lock.flush()
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            ledger = json.loads(path.read_text()) if path.exists() else {'sessions': {}}
+            if event is None:
+                atomic_json(path, {'sessions': {}})
+                return
+            key = str(event.get('session_id') or 'unknown')
+            # Native hosts may change turn IDs when forwarding repair prompts.
+            # The stale episode ends only when verified completion is recorded.
+            record = ledger['sessions'].get(key, {'attempts': 0})
+            record['last_turn'] = event.get('turn_id')
+            record['attempts'] += 1
+            record['status'] = 'halted_unverified' if record['attempts'] > 3 else 'repair_pending'
+            ledger['sessions'][key] = record
+            atomic_json(path, ledger)
+            if record['status'] == 'halted_unverified':
+                return {'continue': False, 'stopReason': '文档同步恢复次数已耗尽；按未核验终止，保留待同步状态，提交门限继续生效。'}
+            return {'decision': 'block', 'reason': context}
+        except (ValueError, KeyError, TypeError, OSError):
+            # A corrupt repair ledger must not become an infinite retry source
+            # or a successful document completion.
+            return {'continue': False, 'stopReason': '文档恢复记录异常；按未核验终止，保留原记录供诊断。'}
+        finally:
+            if os.name == 'nt':
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def project_independent_control(event):
     """Keep exact workflow controls and global skill reads outside project freshness."""
     fields = event.get('tool_input') or {}
@@ -196,12 +243,13 @@ def project_independent_control(event):
         return False
     home = Path.home()
     if args[0] == 'cat' and len(args) > 1:
-        roots = (home / '.codex/skills', home / '.agents/skills', home / '.agent-docs/manual')
+        roots = (home / '.codex/skills', home / '.agents/skills', home / '.agent-docs/manual',
+                 home / '.agent-docs/scripts', home / '.codex/tv', home / '.codex/skill-repos')
         return all(Path(p).is_absolute() and Path(p).is_file() and
                    (any(Path(p).resolve().is_relative_to(r.resolve()) for r in roots) or
                     Path(p).resolve() == (home / '.codex/tv/README.md').resolve())
                    for p in args[1:])
-    if len(args) < 3 or not re.fullmatch(r'python(?:3(?:\\.\\d+)?)?', Path(args[0]).name):
+    if len(args) < 3 or not re.fullmatch(r'python(?:3(?:\.\d+)?)?', Path(args[0]).name):
         return False
     runtime = Path(os.environ.get('CODEX_HOME', str(home / '.codex'))) / 'tv'
     if Path(args[1]).resolve() == (runtime / 'process_gate.py').resolve():
@@ -248,11 +296,15 @@ def _hook(event):
         previous = json.loads(path.read_text()) if path.exists() else {}
         if current == (previous.get('source'), previous.get('documents')):
             if name == 'PreToolUse':
-                ensure_commit_gate(root)
+                commit_gate = ensure_commit_gate(root)
                 context = fresh_context(root, event, current[1])
                 fields = event.get('tool_input') or {}
                 command = fields.get('command', fields.get('cmd', ''))
                 if isinstance(command, str) and re.search(r'\bgit\b.*\bcommit\b', command):
+                    if commit_gate.get('status') == 'needs_integration':
+                        reason = 'needs_integration：提交前须将文档审阅检查接入现有 Git Hook。' + commit_gate['reason']
+                        return {'hookSpecificOutput': {'hookEventName': name, 'permissionDecision': 'deny',
+                                                      'permissionDecisionReason': reason, 'additionalContext': reason}}
                     context += ('\n提交前静默使用 doc-update 核对实际暂存源码与文档，按本次范围同步并暂存；'
                                 '运行 doc-commit-review.py prepare，展示文档差异，收到明确确认后 approve 并提交。')
                 if context:
@@ -262,7 +314,7 @@ def _hook(event):
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         context = '文档内部检查待恢复：' + type(exc).__name__ + '。先诊断并修复，不伪报已同步；日常状态不向用户播报。'
     if name == 'Stop':
-        return {'decision': 'block', 'reason': context}
+        return recovery_record(root, event, context)
     if name == 'PreToolUse' and current[0] is not None:
         inspection = state_path(root).with_name('inspection.json')
         try:

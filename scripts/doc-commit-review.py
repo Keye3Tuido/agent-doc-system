@@ -15,6 +15,11 @@ MARKER = '# agent-doc-system: commit-review-v1'
 HERE = Path(__file__).resolve().parent
 
 
+class IntegrationRequired(ValueError):
+    """An existing hook needs explicit integration; documentation can still sync."""
+
+
+
 def git(root, *args, optional=False, input_data=None):
     r = subprocess.run(['git', '-C', str(root), *args], capture_output=True, input=input_data)
     if r.returncode and not optional:
@@ -103,9 +108,9 @@ def install(root):
         if MARKER in contents and (not custom or command + ' || exit $?' in contents):
             return {'installed': str(hook), 'unchanged': True}
     if custom:
-        raise ValueError('Existing core.hooksPath preserved. Add this script’s check command to its pre-commit manually.')
+        raise IntegrationRequired('Existing core.hooksPath preserved. Add this script’s check command to its pre-commit manually.')
     if hook.is_symlink() or backup.exists():
-        raise ValueError('Existing hook link or backup preserved; integrate manually.')
+        raise IntegrationRequired('Existing hook link or backup preserved; integrate manually.')
     hook.parent.mkdir(parents=True, exist_ok=True)
     prior = ''
     if hook.exists():

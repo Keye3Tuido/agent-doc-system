@@ -499,7 +499,7 @@ def main():
         test_sync_obsolete(tmp)
         test_lint(tmp)
         test_content_constraints(tmp)
-        for script in ("test_doc_commit_review.py", "test_doc_workflow.py"):
+        for script in ("test_doc_commit_review.py", "test_doc_workflow.py", "test_bounded_recovery.py"):
             result = subprocess.run([sys.executable, os.path.join(HERE, script), "-q"],
                                     capture_output=True, text=True, timeout=120)
             check(script + " behavioral tests", result.returncode == 0, result.stdout + result.stderr)

@@ -11,13 +11,13 @@ description: "Before reading project code or documentation, silently check fresh
 
 原生入口按 `agent-doc-system-silent-workflow/<宿主事件名>` 稳定唯一命名；Codex 的完整名称为 `agent-doc-system-silent-workflow/PreToolUse`、`agent-doc-system-silent-workflow/PostToolUse`、`agent-doc-system-silent-workflow/Stop`。首次使用、上下文恢复或配置变化时，逐项核对名称、事件、匹配范围、执行命令、启用及宿主信任状态；同名文件、登记成功或信任字段存在不能代替实际触发证据。重新登记原位更新，名称冲突时保留配置并先查明归属，不能追加重复入口。Codex 用 `statusMessage` 保存名称，宿主可能显示运行标签；日常检查仍只送内部上下文。
 
-验证在隔离环境覆盖六项：三个入口实际执行、重复登记不增加入口、两个系统名称不冲突、无关策略及状态保留、失败命令已产生的写入仍触发同步、重复收尾在文档未同步时不得正常放行。分别记录脚本测试、登记、启用与宿主原生回调结果；失败或未验证项不得计为通过。
+验证在隔离环境覆盖六项：三个入口实际执行、重复登记不增加入口、两个系统名称不冲突、无关策略及状态保留、失败命令已产生的写入仍触发同步、重复收尾在文档未同步时不得记为成功；同一项目、同一会话待同步期间最多自动恢复三次，第四次仍失败时按未核验终止，保留缺口及提交门限。新增读取、源码变化和宿主回合变化均不重置次数；仅真实核验完成后清除恢复记录。分别记录脚本测试、登记、启用与宿主原生回调结果；失败或未验证项不得计为通过。
 
 项目文档工作流自动补齐 Git 提交入口；首次加载已核验文档时由 Hook 送入索引及主模块正文，提交动作自动要求 doc-update 核对实际暂存内容。已有用户文档和其他 Hook 保留。
 
-自定义 Git Hook 路径保持不变。安装器先解析实际 pre-commit；已有入口包含受管标识、当前 Python 与脚本路径对应的检查命令，并传递非零退出码时，直接复用且不重写。未集成的自定义入口保留原状，报告需要人工接入 doc-commit-review.py check --project .。
+自定义 Git Hook 路径保持不变。安装器先解析实际 pre-commit；已有入口包含受管标识、当前 Python 与脚本路径对应的检查命令，并传递非零退出码时，直接复用且不重写。未集成的自定义入口保留原状，单独记录 needs_integration；已通过源码与文档校验的同步仍可完成，提交时阻止操作并说明需接入 doc-commit-review.py check --project .。
 
-收到内部同步要求时运行 `doc-workflow.py inspect --project <project_root>`，核验相关源码并同步文档后，用返回的 source 摘要运行 `complete --source <摘要> --reason <源码依据与同步结论>`。该完成记录由 agent 保存，不是用户确认。源文件再变或文档被修改后重新核验，未同步时不得正常结束；提交审阅仍按手册 §16.2 请求用户确认。
+收到内部同步要求时运行 `doc-workflow.py inspect --project <project_root>`，核验相关源码并同步文档后，用返回的 source 摘要运行 `complete --source <摘要> --reason <源码依据与同步结论>`。该完成记录由 agent 保存，不是用户确认。源文件再变或文档被修改后重新核验，未同步时不能记为成功；自动恢复达到上限则保留未核验状态并停止重复续跑；提交审阅仍按手册 §16.2 请求用户确认。
 
 ## 读取前检查
 
