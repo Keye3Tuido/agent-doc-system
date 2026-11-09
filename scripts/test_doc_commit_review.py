@@ -110,6 +110,24 @@ class CommitReview(unittest.TestCase):
         self.git('commit', '-qm', 'allowed')
         self.assertEqual((self.root / '.git/hook-ran').read_text(), 'ran')
 
+    def test_existing_managed_custom_hook_completes_without_rewriting_it(self):
+        self.assertEqual(self.run_cli('install').returncode, 0)
+        custom = self.root / 'custom-hooks/pre-commit'
+        custom.parent.mkdir()
+        (self.root / '.git/hooks/pre-commit').rename(custom)
+        before = custom.read_bytes()
+        self.git('config', 'core.hooksPath', 'custom-hooks')
+        result = self.run_cli('install')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(custom.read_bytes(), before)
+        self.assertEqual(self.git('config', '--get', 'core.hooksPath'), 'custom-hooks')
+        self.write('code.txt', 'two\n')
+        self.git('add', '.')
+        result = subprocess.run(['git', '-C', str(self.root), 'commit', '-qm', 'blocked'], capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.approve(self.prepare())
+        self.git('commit', '-qm', 'allowed')
+
     def test_custom_hooks_path_is_not_modified(self):
         self.git('config', 'core.hooksPath', 'custom-hooks')
         self.assertNotEqual(self.run_cli('install').returncode, 0)

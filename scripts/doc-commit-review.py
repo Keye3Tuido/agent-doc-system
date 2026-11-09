@@ -90,14 +90,20 @@ def save(path, data):
 
 
 def install(root):
-    if git(root, 'config', '--get', 'core.hooksPath', optional=True):
-        raise ValueError('Existing core.hooksPath preserved. Add this script’s check command to its pre-commit manually.')
+    custom = git(root, 'config', '--get', 'core.hooksPath', optional=True)
     hook = Path(os.fsdecode(git(root, 'rev-parse', '--git-path', 'hooks/pre-commit')).strip())
     if not hook.is_absolute():
         hook = root / hook
     backup = hook.with_name('pre-commit.before-agent-docs')
-    if hook.exists() and MARKER in hook.read_text(errors='replace'):
-        return {'installed': str(hook), 'unchanged': True}
+    command = ' '.join(shlex.quote(x) for x in (sys.executable, str(Path(__file__).resolve()), 'check', '--project', '.'))
+    if hook.is_file() and not hook.is_symlink():
+        contents = hook.read_text(errors='replace')
+        # A custom path may already have been integrated manually. Reuse the
+        # actual review check while leaving both the hook and Git config intact.
+        if MARKER in contents and (not custom or command + ' || exit $?' in contents):
+            return {'installed': str(hook), 'unchanged': True}
+    if custom:
+        raise ValueError('Existing core.hooksPath preserved. Add this script’s check command to its pre-commit manually.')
     if hook.is_symlink() or backup.exists():
         raise ValueError('Existing hook link or backup preserved; integrate manually.')
     hook.parent.mkdir(parents=True, exist_ok=True)

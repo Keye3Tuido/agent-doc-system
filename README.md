@@ -30,7 +30,7 @@ python3 agent-doc-system/installers/install-global.py --upgrade --skills-target 
 python3 ~/.agent-docs/scripts/doc-commit-review.py install --project <project_root>
 ```
 
-该命令只安装一个 Git pre-commit，保留已有入口。静默核验与同步另需三个宿主入口，见下文。项目指令持续引用 doc-context（读取前检查）与 doc-update（写后同步）。已有自定义 hooksPath 时按提示集成到原入口。
+该命令只安装一个 Git pre-commit，保留已有入口。静默核验与同步另需三个宿主入口，见下文。项目指令持续引用 doc-context（读取前检查）与 doc-update（写后同步）。已有自定义 hooksPath 时，安装器复用已包含当前受管检查命令且传递失败退出码的入口，保持原文件和 Git 配置；未集成时按提示人工接入原入口。
 
 日常文档同步直接落盘。提交前运行 `doc-commit-review.py prepare --project <project_root>`，展示报告，用户确认本次文档审阅后运行 `approve --project <project_root> --digest <摘要> --reason <结论>`，再正常提交。暂存内容、HEAD 或报告变化后须重新审阅；用户不用抄写摘要。完整步骤与能力边界见手册 §16.2。
 
