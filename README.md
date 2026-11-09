@@ -1,8 +1,8 @@
-# agent-doc-system
+# agent-doc-system 5.0.0
 
 基于项目的 git submodule 结构自动构建文档库，描述各模块的职责与架构。以远程 URL、仓库、分支作为文档划分依据；以文档内容与实际代码是否一致、远端 commit sha 与文档记录是否一致作为更新依据。
 
-系统由技能、检测脚本和项目文档库组成，可在能读取 SKILL.md 并执行 Python 3.11+ 和 Git 的 AI 环境中使用。读取前静默检查相关文档，写入后静默同步；只有提交时集中审阅文档变化。日常流程由三个宿主入口触发技能，提交门限使用一个 Git pre-commit；其他 AI 按等效事件接入。
+系统由技能、检测脚本和项目文档库组成，可在能读取 SKILL.md 并执行 Python 3.11+ 和 Git 的 AI 环境中使用。读取前静默检查相关文档，写入后静默同步；只有提交时集中审阅文档变化。自动调用规则安装到宿主实际读取的 AGENTS.md，由 AI 在当前任务中执行；不使用宿主 Hook 或 Git Hook。
 
 ## 安装
 
@@ -24,15 +24,18 @@ python3 agent-doc-system/installers/install-global.py --upgrade --skills-target 
 
 仅同步包内 doc-* 的 SKILL.md，保留其他技能及附加文件。升级后对比全局包和实际 IDE 文件，避免运行旧副本。
 
-### 项目提交门限（每个仓库安装一次）
+### 安装自动调用规则
+
+规则原文见 [templates/AGENTS.md](templates/AGENTS.md)。选择当前 AI 实际读取的全局或项目 AGENTS.md；已有全局规则覆盖当前项目时复用。安装时将 `@SKILLS_ROOT@` 替换为实际技能目录。
 
 ```bash
-python3 ~/.agent-docs/scripts/doc-commit-review.py install --project <project_root>
+python3 ~/.agent-docs/scripts/doc-agents.py check --agents-file /path/to/AGENTS.md
+python3 ~/.agent-docs/scripts/doc-agents.py install --agents-file /path/to/AGENTS.md
 ```
 
-该命令只安装一个 Git pre-commit，保留已有入口。静默核验与同步另需三个宿主入口，见下文。项目指令持续引用 doc-context（读取前检查）与 doc-update（写后同步）。已有自定义 hooksPath 时，安装器复用已包含当前受管检查命令且传递失败退出码的入口，保持原文件和 Git 配置；未集成时按提示人工接入原入口。
+使用文档技能时会检查并补齐这个区块。安装前备份，保留已有用户规则，重复安装不重复追加。包安装器也支持 `--agents-file /path/to/AGENTS.md`；技能安装到其他位置时指定 `--skills-root`。仅写入文件不能证明宿主已加载规则，必要时新建会话核验。
 
-日常文档同步直接落盘。提交前运行 `doc-commit-review.py prepare --project <project_root>`，展示报告，用户确认本次文档审阅后运行 `approve --project <project_root> --digest <摘要> --reason <结论>`，再正常提交。暂存内容、HEAD 或报告变化后须重新审阅；用户不用抄写摘要。完整步骤与能力边界见手册 §16.2。
+规则要求读取前调用 doc-context 核对新鲜度、写入批次后调用 doc-update 同步，提交前核对实际暂存差异并审阅。日常处理静默完成；取得本次提交审阅确认后再提交，已有覆盖该差异的明确授权可复用。规则依赖 AI 遵循指令，不是程序硬性拦截。
 
 ### 第二步：为各 IDE 安装 skill
 
@@ -132,7 +135,7 @@ done
    - **软链接方式**（如 Claude Code、Kiro、DeepSeek、Cursor、VSCode/Copilot）：无需额外操作，自动生效。
    - **复制方式**：检测变更并提示用户确认后覆盖更新。
 
-升级旧版本前，从宿主移除旧文档系统的 Hook 注册；其他策略保持原样。新版使用 §16.3 的三个静默入口，登记后在宿主中审阅并启用；不要求专用会话绑定。
+升级旧版本时备份并移除本系统宿主注册和 Git 提交检查部分，保留其他系统策略与已有自定义入口。随后检查 AGENTS.md 区块；后续安装不再登记 Hook。迁移步骤见手册 §16.3。
 
 ### 方式二：手动运行脚本
 
@@ -192,8 +195,11 @@ agent-doc-system/
 
 项目文档库不在全局配置中，各项目独立维护。
 
-## 静默核验与同步入口
+## 验证
 
-当前 Codex 宿主运行 `python3 ~/.agent-docs/scripts/doc-workflow.py register`，登记读前、写后、收尾三个禁用入口，再在宿主 Hook 管理中审阅并启用。其他 AI 按手册 §16.3 映射等效事件。入口唯一标识为 `agent-doc-system-silent-workflow`，不依赖旧适配器或专用会话绑定。
+```bash
+python3 scripts/selftest.py
+python3 scripts/doc-lint-consistency.py .
+```
 
-正常检查、状态和进度只进入内部记录。过时文档由 agent 核验源码后同步；钩子负责触发、指纹失效及收尾检查，不能证明文档语义正确。日常维护不请求用户批准，提交时才集中审阅。登记和脚本测试不等于宿主已实际启用。
+安装与检查命令接受显式目标文件，因此可在临时目录验证，不依赖特定 AI 宿主。测试覆盖规则的幂等合并、用户内容保留、错误标记保护及移除 Hook 安装能力；实际自动调用还需验证宿主已加载规则和 AI 的执行行为。

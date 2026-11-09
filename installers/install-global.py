@@ -18,12 +18,16 @@ import argparse
 import os
 import shutil
 import sys
+import subprocess
 from datetime import datetime
 
 AGENT_DOCS_HOME = os.path.expanduser("~/.agent-docs")
 TARGETS = ("manual", "scripts", "skills", "templates", "installers")
-ROOT_FILES = ("urls.conf", "README.md")  # 根目录下需要安装的单文件
+ROOT_FILES = ("urls.conf", "README.md", "VERSION")  # 根目录下需要安装的单文件
 RETIRED_FILES = (
+    "scripts/test_doc_commit_review.py",
+    "scripts/test_doc_workflow.py",
+    "scripts/test_bounded_recovery.py",
     "scripts/doc-gate.py", "scripts/doc-gate-install.py",
     "scripts/test_doc_gate.py", "scripts/test_doc_gate_install.py",
 )
@@ -75,6 +79,7 @@ def main():
     p.add_argument("--purge", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--skills-target", default=None, help="Also synchronize doc-* SKILL.md files into this IDE skills directory")
+    p.add_argument("--agents-file", default=None, help="Explicit instruction file loaded by the current host")
     args = p.parse_args()
 
     src_root = os.path.abspath(args.source or os.path.dirname(os.path.dirname(__file__)))
@@ -160,6 +165,9 @@ def main():
             path = item if isinstance(item, str) else item[1]
             print(f"  {label}  {os.path.relpath(path, AGENT_DOCS_HOME)}")
 
+    if args.agents_file:
+        print("  AGENTS  " + os.path.abspath(os.path.expanduser(args.agents_file)))
+
     if args.dry_run:
         print("[dry-run] no files written")
         return 0
@@ -179,6 +187,13 @@ def main():
     for dp in purged:
         if os.path.isfile(dp):
             os.remove(dp)
+
+    if args.agents_file:
+        subprocess.run([sys.executable, os.path.join(AGENT_DOCS_HOME, 'scripts', 'doc-agents.py'),
+                        'install', '--agents-file', args.agents_file, '--skills-root',
+                        args.skills_target or os.path.join(AGENT_DOCS_HOME, 'skills')], check=True)
+    else:
+        print('Select the AGENTS.md actually loaded by your host and run doc-agents.py install --agents-file PATH.')
 
     print(f"\nInstalled to {AGENT_DOCS_HOME}: {len(added)} added, {len(replaced)} replaced, {len(purged)} purged, {len(skipped)} skipped.")
     return 0

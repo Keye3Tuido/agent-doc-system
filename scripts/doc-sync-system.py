@@ -41,8 +41,11 @@ import urllib.request
 import zipfile
 
 AGENT_DOCS_HOME = os.path.expanduser("~/.agent-docs")
-TARGETS = ("manual", "scripts", "skills", "templates", "installers", "urls.conf", "README.md")
+TARGETS = ("manual", "scripts", "skills", "templates", "installers", "urls.conf", "README.md", "VERSION")
 OBSOLETE_PATHS = (
+    "scripts/test_doc_commit_review.py",
+    "scripts/test_doc_workflow.py",
+    "scripts/test_bounded_recovery.py",
     "scripts/doc-gate.py",
     "scripts/doc-gate-install.py",
     "scripts/test_doc_gate.py",

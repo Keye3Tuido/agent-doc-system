@@ -5,19 +5,11 @@ description: "Update existing documentation files for one or all submodules in t
 
 > 本 skill 是全局 `~/.agent-docs/manual/doc-system.md` 的执行入口，对应章节：§4（每对话流程，含 STALE 内容判定）+ §7（更新触发条件）+ §8（文档模板）+ §11（diff 提议格式）+ §16（工具脚本）。完整规则以手册为准，本文件只列执行步骤，不复述规则。
 
-## 静默钩子协作
+## AGENTS.md 自动调用
 
-使用前检查当前 AI 宿主是否已登记并启用 `agent-doc-system-silent-workflow` 的读取前、写后和收尾职责；当前 Codex 用 `doc-workflow.py status` 检查，缺失时按手册 §16.3 登记并在宿主审阅，其他 AI 使用等效事件。安装与维护本体系可以继续，不因门限未启用而锁死修复。钩子的条件和进度只送内部上下文，不向用户播报或索要日常批准。
+使用前检查当前宿主实际加载的全局或项目 AGENTS.md 是否包含 `project-doc-skills` 标记区块。运行 `python3 ~/.agent-docs/scripts/doc-agents.py check --agents-file <实际规则文件>`；缺失或过期时，备份后用同样参数的 `install` 合并。使用本技能包含补齐该规则区块的授权；保留区块外规则，标记异常时先查明。已有全局区块适用于当前项目时复用，技能安装在其他目录时加 `--skills-root <技能目录>`。路径不明确时先核实宿主设置，不猜测所有 AI 都读取同一全局位置。宿主未自动读取 AGENTS.md 时，将规则放入其支持的指令入口；不能把写入文件当作已加载的证明。
 
-原生入口按 `agent-doc-system-silent-workflow/<宿主事件名>` 稳定唯一命名；Codex 的完整名称为 `agent-doc-system-silent-workflow/PreToolUse`、`agent-doc-system-silent-workflow/PostToolUse`、`agent-doc-system-silent-workflow/Stop`。首次使用、上下文恢复或配置变化时，逐项核对名称、事件、匹配范围、执行命令、启用及宿主信任状态；同名文件、登记成功或信任字段存在不能代替实际触发证据。重新登记原位更新，名称冲突时保留配置并先查明归属，不能追加重复入口。Codex 用 `statusMessage` 保存名称，宿主可能显示运行标签；日常检查仍只送内部上下文。
-
-验证在隔离环境覆盖六项：三个入口实际执行、重复登记不增加入口、两个系统名称不冲突、无关策略及状态保留、失败命令已产生的写入仍触发同步、重复收尾在文档未同步时不得记为成功；同一项目、同一会话待同步期间最多自动恢复三次，第四次仍失败时按未核验终止，保留缺口及提交门限。新增读取、源码变化和宿主回合变化均不重置次数；仅真实核验完成后清除恢复记录。分别记录脚本测试、登记、启用与宿主原生回调结果；失败或未验证项不得计为通过。
-
-项目文档工作流自动补齐 Git 提交入口；首次加载已核验文档时由 Hook 送入索引及主模块正文，提交动作自动要求 doc-update 核对实际暂存内容。已有用户文档和其他 Hook 保留。
-
-自定义 Git Hook 路径保持不变。安装器先解析实际 pre-commit；已有入口包含受管标识、当前 Python 与脚本路径对应的检查命令，并传递非零退出码时，直接复用且不重写。未集成的自定义入口保留原状，单独记录 needs_integration；已通过源码与文档校验的同步仍可完成，提交时阻止操作并说明需接入 doc-commit-review.py check --project .。
-
-收到内部同步要求时运行 `doc-workflow.py inspect --project <project_root>`，核验相关源码并同步文档后，用返回的 source 摘要运行 `complete --source <摘要> --reason <源码依据与同步结论>`。该完成记录由 agent 保存，不是用户确认。源文件再变或文档被修改后重新核验，未同步时不能记为成功；自动恢复达到上限则保留未核验状态并停止重复续跑；提交审阅仍按手册 §16.2 请求用户确认。
+读取前按 doc-context 核验并加载，项目写入后按 doc-update 同步，提交前审阅实际文档变化。检查在当前任务中静默完成；不登记宿主 Hook 或 Git Hook，不创建反馈续跑消息。当前会话直接执行本技能，自动触发规则以宿主实际加载为准。
 
 ## 触发形式
 
@@ -26,6 +18,8 @@ description: "Update existing documentation files for one or all submodules in t
 - `/doc-update main`：仅处理主模块文档（`doc-library/main-module.md`）。
 
 ## 自动调用范围
+
+项目文档库不存在时简短提示一次，继续当前可执行任务；仅在用户要求初始化时使用 doc-init，不为完成同步检查擅自创建文档库。
 
 读取前发现过时内容或项目写入后，按本次实际变化路径选择主模块、相关子模块及受影响的协作章节，直接进入阶段 B。包括已暂存但未切换工作树的子模块版本、本地提交、工作区及新增文件；不能只等远端 SHA 漂移才更新。文档库已存在但相关模块缺文档时，核验后补建骨架和正文。使用本次已核验的范围，避免每次写入都全库扫描。
 
@@ -103,7 +97,7 @@ description: "Update existing documentation files for one or all submodules in t
 1. 每次项目写入后，包括命令失败但已产生文件变化时，核对受影响主模块和子模块的职责、架构、接口、数据契约、关键流程及索引；需要更新则立即同步，完成后再继续依赖这些内容的操作。多文件事务可作为一个写入批次处理。
 2. `_index.md.project_config.initial_bootstrap_done` 为 `false` 且手册 §13 的三项条件满足时，同步改为 `true`。
 3. 运行编码和格式检查。索引派生表变化时运行 `doc-tree.py --emit-index-tables` 再生对应两节。静默修复可确定的问题，保留无法核实的事项，不伪造已同步状态。
-4. 提交前核对实际暂存源码与文档，运行手册 §16.2 的 `prepare`，向用户展示文档差异或无需更新的依据，收到本次审阅的明确确认后再 `approve` 和提交。日常写入不等待这一步。
+4. 提交前核对实际暂存源码与文档，按手册 §16.2 展示实际暂存的文档差异或无需更新的依据，取得本次审阅确认后再提交；已有明确覆盖该差异的授权可复用。日常写入不等待这一步。
 
 ## 硬约束
 

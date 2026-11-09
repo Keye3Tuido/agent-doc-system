@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require synchronized documentation and review staged changes at the Git commit boundary."""
+"""Optional reports and review records for staged documentation changes."""
 import argparse
 import hashlib
 import importlib.util
@@ -11,13 +11,7 @@ import subprocess
 import sys
 import tempfile
 
-MARKER = '# agent-doc-system: commit-review-v1'
 HERE = Path(__file__).resolve().parent
-
-
-class IntegrationRequired(ValueError):
-    """An existing hook needs explicit integration; documentation can still sync."""
-
 
 
 def git(root, *args, optional=False, input_data=None):
@@ -94,47 +88,14 @@ def save(path, data):
     temp.replace(path)
 
 
-def install(root):
-    custom = git(root, 'config', '--get', 'core.hooksPath', optional=True)
-    hook = Path(os.fsdecode(git(root, 'rev-parse', '--git-path', 'hooks/pre-commit')).strip())
-    if not hook.is_absolute():
-        hook = root / hook
-    backup = hook.with_name('pre-commit.before-agent-docs')
-    command = ' '.join(shlex.quote(x) for x in (sys.executable, str(Path(__file__).resolve()), 'check', '--project', '.'))
-    if hook.is_file() and not hook.is_symlink():
-        contents = hook.read_text(errors='replace')
-        # A custom path may already have been integrated manually. Reuse the
-        # actual review check while leaving both the hook and Git config intact.
-        if MARKER in contents and (not custom or command + ' || exit $?' in contents):
-            return {'installed': str(hook), 'unchanged': True}
-    if custom:
-        raise IntegrationRequired('Existing core.hooksPath preserved. Add this script’s check command to its pre-commit manually.')
-    if hook.is_symlink() or backup.exists():
-        raise IntegrationRequired('Existing hook link or backup preserved; integrate manually.')
-    hook.parent.mkdir(parents=True, exist_ok=True)
-    prior = ''
-    if hook.exists():
-        prior = '\nif [ -x ' + shlex.quote(str(backup)) + ' ]; then\n  ' + shlex.quote(str(backup)) + ' "$@" || exit $?\nfi\n'
-        hook.rename(backup)
-    # Git runs pre-commit in the current worktree root; hook files may be shared.
-    command = ' '.join(shlex.quote(x) for x in (sys.executable, str(Path(__file__).resolve()), 'check', '--project', '.'))
-    # Existing hooks may reformat and restage files. Recheck their final index.
-    hook.write_text('#!/bin/sh\n' + MARKER + '\n' + command + ' || exit $?\n' + prior + (command + ' || exit $?\n' if prior else ''), encoding='utf-8')
-    hook.chmod(0o755)
-    return {'installed': str(hook), 'previous_hook': str(backup) if prior else None}
-
-
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('action', choices=('install', 'prepare', 'approve', 'check'))
+    p.add_argument('action', choices=('prepare', 'approve', 'check'))
     p.add_argument('--project', default='.')
     p.add_argument('--digest')
     p.add_argument('--reason', help='Review conclusion, including why docs need no change when applicable')
     args = p.parse_args()
     root = Path(os.fsdecode(git(Path(args.project).resolve(), 'rev-parse', '--show-toplevel')).strip()).resolve()
-    if args.action == 'install':
-        print(json.dumps(install(root), ensure_ascii=False))
-        return
     head, tree, digest = snapshot(root)
     managed = bool(docs(root, tree) or docs(root, head))
     if not managed and args.action == 'check':

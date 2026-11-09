@@ -99,7 +99,7 @@ schema_version: 7
 6. 文档 `commit` 表示已核验的提交基线；未提交代码变化也须写入正文，不能仅更新 SHA。同步时保留用户已有改动；更新索引表必须使用 `doc-tree.py --emit-index-tables`。
 7. 可确定的问题静默修复。源码缺失、冲突或无法验证的事项保留待解决状态，不伪造同步结论；继续可核验的工作，提交前集中解决并审阅。不要逐次提示 stale 或要求日常批准。
 
-规则由 doc-context 和 doc-update 执行，§16.3 的宿主钩子触发检查、记录实际变化并防止漏掉收尾同步。项目指令持续引用这两个技能；提交审阅见 §16.2。
+规则由 AI 根据 AGENTS.md 自动调用 doc-context 和 doc-update 执行。每次使用技能检查规则安装情况（§16.3），不注册宿主 Hook 或 Git Hook；提交审阅见 §16.2。
 
 ---
 
@@ -372,7 +372,7 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 
 日常同步直接写入正式文档；用户原有内容和未提交改动必须保留。文档变更通过 Git 留下实际差异，提交前一次审阅，避免逐文件审批。
 
-提交前将本次源码和相关文档按同一范围暂存。运行 §16.2 的 `prepare`，审阅报告保存完整文档 diff、源码 diff、变更清单及摘要。对话中只说明变化概要和报告位置；文档无需变更时说明已核对的源码和理由。收到用户对本次报告的明确确认后记录批准，再提交；普通的明确确认即可，用户不用抄写摘要。
+提交前将本次源码和相关文档按同一范围暂存，按 §16.2 审阅实际暂存的文档 diff 与相关源码 diff。对话中说明变化概要并提供可审阅的完整差异；文档无需变更时说明已核验范围和具体理由。取得用户对本次差异的明确确认后再提交，已有覆盖该差异的明确授权可复用。可选报告工具用于保存快照，日常流程不依赖报告或摘要。
 
 报告、暂存树或 HEAD 改变后原批准失效。部分暂存时，文档描述必须对应将要提交的源码；工作区另有变化时不能直接把工作区文档当成提交快照。
 
@@ -482,12 +482,10 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 | `doc-sync-system.py` | 下载远程 skill 包并安装（备份 → dry-run → 覆写；仅按显式 `OBSOLETE_PATHS` 清理废弃文件） | `python3 ~/.agent-docs/scripts/doc-sync-system.py [--url <url>] [--dry-run] [--no-backup]` |
 
 
-| `doc-commit-review.py` | 安装一个 Git 提交入口，生成暂存文档审阅、记录批准并检查提交 | `python3 ~/.agent-docs/scripts/doc-commit-review.py prepare --project <project_root>` |
-| `test_doc_commit_review.py` | 临时 Git 仓库中的真实提交与审阅失效测试 | `python3 ~/.agent-docs/scripts/test_doc_commit_review.py -q` |
-
-| `doc-workflow.py` | 静默核验与同步的三类事件处理、检查/完成记录及宿主登记 | `python3 ~/.agent-docs/scripts/doc-workflow.py inspect --project <project_root>` |
-| `test_doc_workflow.py` | 临时仓库中的静默触发、变更失效、收尾阻断与配置保留测试 | `python3 ~/.agent-docs/scripts/test_doc_workflow.py -q` |
-| `test_bounded_recovery.py` | 验证恢复次数有界、宿主回合变化不重置、维护入口可用及文档同步与提交集成状态独立 | `python3 ~/.agent-docs/scripts/test_bounded_recovery.py -q` |
+| `doc-commit-review.py` | 可选的暂存差异报告、审阅记录及快照核对，不安装 Hook | `python3 ~/.agent-docs/scripts/doc-commit-review.py prepare --project <project_root>` |
+| `doc-workflow.py` | 可选的源码摘要检查及核验结论记录，不注册或执行 Hook | `python3 ~/.agent-docs/scripts/doc-workflow.py inspect --project <project_root>` |
+| `doc-agents.py` | 检查或幂等合并 AGENTS.md 自动调用规则 | `python3 ~/.agent-docs/scripts/doc-agents.py check --agents-file <实际规则文件>` |
+| `test_doc_agents.py` | 隔离验证规则安装、用户内容保留与无 Hook 行为 | `python3 ~/.agent-docs/scripts/test_doc_agents.py -q` |
 
 ### 16.1 agent 使用规则
 
@@ -495,50 +493,36 @@ Delegate/Protocol 模式清单：谁定义接口、谁实现、调用时机；�
 - 新建文档时**优先使用 `doc-scaffold.py`** 生成骨架，再补充语义内容。
 - **所有文本写入的统一模式**：(1) 写入（`fs_write` / 脚本 `--out` / Python `open`）；(2) 立即 `bash ~/.agent-docs/scripts/convert-to-utf8.sh <path>`。已知 bug：`fs_write` 及部分 Python 实现在中文系统将 UTF-8 误存为 GBK，仅靠 `encoding="utf-8"` 不足以防御。若该脚本以非零退出报「编码无法判定」，说明写出的**不是**合法 UTF-8：必须重写该文件，不得忽略、也不要改用 `--guess` 蒙。
 - `/doc-tree` skill 直接调用 `doc-tree.py` 输出结果。
-- 提交审阅报告由 `doc-commit-review.py prepare` 写入 Git 目录，不进入项目文档库。对话中给出报告位置和概要，用户确认后记录批准。
+- 使用可选提交审阅报告工具时，报告写入 Git 目录，不进入项目文档库；直接审阅实际暂存 diff 同样适用。
 
 
-### 16.2 Git 提交审阅门限
+### 16.2 Git 提交前审阅
 
-提交审阅使用每个仓库的一个 Git `pre-commit`；日常自动核验与同步由 §16.3 的三个宿主入口触发。日常内部检查不要求用户确认，Git 提交审阅才请求确认。
+每次提交前由 AI 按 AGENTS.md 执行 doc-update，核对实际暂存源码及相关文档。此流程是指令约束，不是 Git 强制拦截。
 
-首次使用项目文档工作流时，静默同步完成入口自动安装该仓库的 Git 提交门限；读取已核验文档时也补齐缺失入口。已有 Hook 保留并串联，重复安装不叠加。自定义 hooksPath 或软链接需先核实集成，不能覆盖。也可显式执行：
+1. 检查实际暂存差异；存在未暂存且应随提交同步的文档时，按本次授权范围补齐，保留用户无关改动。未提交源码与文档同时核对，不能仅凭 SHA 宣称同步。
+2. 展示文档变化概要及可审阅的完整差异；文档无需修改时说明实际核验范围与具体依据。
+3. 取得用户对本次差异的明确确认再提交；已有明确覆盖该差异的授权可以复用。内容变化后重新核对受影响部分，不用用户抄写摘要。日常核验、写入和同步不请求这项确认。
+
+可直接使用 `git diff --cached` 审阅，也可选用 doc-commit-review.py 的 prepare、approve、check 记录当前快照。该辅助工具要求先用 doc-workflow.py inspect 获取摘要，在真实源码核验、文档同步及校验完成后用 complete 记录结论；它不安装 Hook，正常维护不依赖该记录。脚本只能验证摘要、编码和结构，语义一致性仍由 AI 和审阅者判断。
+
+### 16.3 AGENTS.md 自动调用规则
+
+自动维护规则的发布原文为 `templates/AGENTS.md`，安装器将其中技能目录占位符替换为实际路径后合并。可直接读取和审阅该文件，再选择安装位置。
+
+使用任一文档技能时，先确定当前宿主实际读取的全局或项目 AGENTS.md，检查其 `project-doc-skills` 标记区块是否完整、内容是否与当前安装一致。全局规则已覆盖当前项目时复用，避免重复安装。
 
 ```bash
-python3 ~/.agent-docs/scripts/doc-commit-review.py install --project <project_root>
+python3 ~/.agent-docs/scripts/doc-agents.py check --agents-file <实际规则文件>
+python3 ~/.agent-docs/scripts/doc-agents.py install --agents-file <实际规则文件>
 ```
 
-安装器保留已有可执行 pre-commit 并在文档检查通过后调用；重复安装不叠加入口。配置自定义 core.hooksPath 时，若实际入口包含受管标识、当前解释器及脚本路径对应的检查命令，并传递非零退出码，则直接复用且不重写。自定义 `core.hooksPath` 尚未满足上述复用条件、入口是软链接或备份已存在时，保持原配置，报告人工集成入口：在原 pre-commit 中调用本脚本的 `check`，并传递非零退出码。文档同步与提交门限接入分别记录：上述已知集成缺口记为 `commit_gate.status: needs_integration`，已完成源码及文档校验的同步仍可落盘；提交时拒绝继续并说明具体接入缺口。其他安装错误仍保留为错误。全局包更新不自动修改业务项目。已有入口重写暂存区后再次核对快照，防止后续 Hook 产生未经审阅的提交内容。
+技能目录与默认全局包不同，可使用 `--skills-root <实际技能目录>`。安装器同样支持显式选择 `--agents-file`；不指定时仅安装包，并提示补齐规则。不能假定所有 AI 软件均读取同一个全局位置；宿主不支持 AGENTS.md 时，使用其支持的规则入口载入同一内容，并如实说明自动加载情况。
 
-提交过程：
+使用技能包含检查与补齐对应规则区块的授权，仍遵守宿主权限。install 会备份已有文件，只替换标记区块，保留其他规则；重复运行不重复追加，标记残缺或重复时保留原文件并报错。check 只读且返回安装状态，不创建文件。文件已安装和宿主已加载分别核验，必要时在新会话验证加载。
 
-1. 完成源码核验和静默文档同步；解决本次范围内尚未核验的问题。按本次提交范围暂存源码和文档。
-2. 运行 `python3 ~/.agent-docs/scripts/doc-commit-review.py prepare --project <project_root>`。脚本先核对当前源码和文档的同步完成记录；未完成时要求 agent 静默核验并补齐，并核对同步后的文档与暂存文档字节一致，防止遗漏暂存；随后读取实际暂存对象，校验编码和格式，将完整文档差异、源码差异及摘要写入 Git 目录中的 `agent-docs-commit-review/review.md`，返回路径和摘要。
-3. 用户查看报告并明确确认本次审阅。agent 不得自行确认；用户仅要求提交但尚未看到文档差异时，先展示报告，再等待确认。没有文档差异时也要说明无需更新的源码依据。
-4. 收到确认后运行 `python3 ~/.agent-docs/scripts/doc-commit-review.py approve --project <project_root> --digest <prepare返回摘要> --reason <审阅结论>`，然后正常 `git commit`。
-5. pre-commit 调用 `check`，检查暂存树、HEAD、报告和批准状态，再次校验暂存文档。任何变化或缺少批准都会拒绝本次提交；重新 prepare 并审阅后重试。首次提交和整库删除也须审阅。仓库在 HEAD 和暂存区均无文档库时正常放行。
+区块要求每次读取前使用 doc-context 核对新鲜度，写入批次后使用 doc-update 同步，提交前审阅实际差异；上下文恢复、任务切换、局部工作结束及最终交付前重新对齐。日常检查在当前任务中静默执行，不生成用户消息或收尾重试链。文档自身写入只校验必要派生内容，不递归维护。
 
-仅提交时要求人工介入。审批凭据和报告保存在当前仓库的 Git 目录，不要求新会话。关联 worktree 使用各自的 Git 状态目录。
+旧版本迁移时备份并删除本系统的宿主注册和 Git 提交检查部分；恢复原有 pre-commit，混合自定义入口只删除明确受管的检查行。保留其他系统的 Hook、用户脚本、Git 配置及历史诊断记录。修改注册配置后先重新加载宿主，确认旧回调停止，再清理旧运行时；不要先删除仍被当前进程缓存引用的脚本。旧注册、安装和回调入口均已移除；后续安装不会重新登记。
 
-**能力边界**：源码与文档语义是否一致由 agent 核验、用户审阅判断，编码和 schema 校验不能证明语义正确。日常自动触发由 §16.3 的宿主入口落实，语义核验仍由 agent 完成。Git 门限保证正常提交经过当前快照的审阅记录；本地用户或 agent 可以修改记录、移除 Hook 或使用 Git 的跳过机制，不能把它当作对抗恶意绕过的权限系统。技能禁止自行批准或跳过门限。
-
-### 16.3 静默核验与同步钩子
-
-逻辑标识固定为 `agent-doc-system-silent-workflow`。必须覆盖读取前核验、写后观察、收尾未同步时继续修复三项职责；当前映射为 `PreToolUse`、`PostToolUse`、`Stop` 三个入口。Git 提交入口另计，共四个入口。其他 AI 可映射到等效接口，能合并时合并，但不能漏掉最后一次写入后的同步。
-
-- **工具前**：比较项目源码与文档指纹。首次加载或文档版本变化时，将已核验索引和主模块正文静默送入 doc-context，按任务路径继续加载相关模块；提交动作额外要求 doc-update 核对暂存内容。指纹未变时静默放行；未检查过当前源码时内部拒绝原调用并要求 agent 执行 `inspect`，不请求用户批准。进入核验后允许读取修复所需的源码与文档，旧正文不能作为已核验事实。指纹检查异常时保留诊断与修复入口，由收尾检查继续阻止未同步状态正常结束。
-- **初始化与控制入口**：精确的本会话 TV 管理命令、全局技能和手册的纯读取独立于项目文档新鲜度，避免两个系统相互锁住；混合项目路径、跨会话参数或组合 shell 命令仍进入正常项目检查。TV 的动作许可和身份校验继续由 TV 适配器负责。
-- **工具后**：检查实际文件变化，命令失败但已写入也重新触发；相同字节不触发。通过模型上下文要求立即执行 doc-update，不发送用户状态消息。
-- **收尾**：没有与当前指纹匹配的完成记录时返回继续修复要求，阻止把未同步状态当作正常完成；不是用户审批点。
-
-源码指纹包含主仓库与已初始化子模块的 HEAD、现有远端引用、暂存与工作区差异、非忽略新增文件；正式文档单独计算指纹。显式的工具工作目录或文件路径优先于聊天初始目录；子模块没有独立文档库时，检查最近的有文档库的父项目。范围限于事件中能定位的 Git 项目及已初始化子模块；忽略文件和任意命令在其他目录产生的副作用不在自动扫描范围内。不能以指纹相同证明自然语言描述一定正确。
-
-agent 内部同步步骤：
-
-1. `python3 ~/.agent-docs/scripts/doc-workflow.py inspect --project <project_root>`，取得源码摘要与 stale 检测结果。
-2. 核验相关源码并按 doc-update 更新文档；没有语义变化时保留正文并记录依据。保留用户已有修改。
-3. `python3 ~/.agent-docs/scripts/doc-workflow.py complete --project <project_root> --source <源码摘要> --reason <源码依据与同步结论>`。脚本核对 inspect 记录、源码未变、当前文档编码和格式，保存完成记录。该命令记录 agent 核验结论，不代表用户批准或程序证明语义正确。
-
-每个入口使用稳定唯一名称 `agent-doc-system-silent-workflow/<事件名>`，当前分别为 `agent-doc-system-silent-workflow/PreToolUse`、`agent-doc-system-silent-workflow/PostToolUse`、`agent-doc-system-silent-workflow/Stop`。名称与目录、日期、注册次数无关；重新注册在原位置更新，发现同名入口冲突时拒绝写入。Codex 登记使用 `statusMessage` 保存名称，宿主可能将其显示为运行状态。所有条件检查、进度、重复回调和成功记录的内部反馈只送模型上下文，不播报日常检查或请求确认。可恢复问题先自动修复；只有需要用户事实、决策、业务授权或无法恢复的具体问题时才简短说明一次。宿主自己的工具运行界面不由技能隐藏。维护文档系统本身不要求先具备有效项目同步记录。宿主入口被明确关闭时，即使宿主继续转发此前加载的回调，运行时也返回空结果；关闭不产生文档同步成功记录。 同一项目、同一会话的待同步期间最多自动恢复三次，第四次仍未完成则以 `halted_unverified` 停止恢复链；源码摘要、候选或宿主回合 ID 的变化不重置次数。仅真实源码核验、文档同步及校验完成后清除该恢复记录。停止恢复不产生同步成功记录，读取仍按未核验处理，提交门限继续生效。
-
-当前宿主使用 Codex 时，运行 `python3 ~/.agent-docs/scripts/doc-workflow.py register` 登记三个禁用入口并备份配置；用 `status` 检查登记与启用状态。在宿主的 Hook 管理中审阅并信任当前命令后才能启用；不得自行填写信任摘要。登记、隔离脚本测试、启用和原生回调实测分别报告，不能混为生效证明。原生实测直接使用当前会话，不要求新建或绑定专用会话；执行结果以实际触发、同步及收尾续跑为准。事件摘要位于 Git 目录的 `agent-docs-workflow/observations.jsonl`。事件摘要记录门限标识、会话、调用 ID、完整参数摘要和实际决策；拒绝记录可供其他策略关联同一调用，不能仅凭缺回调推断拒绝。记录不包含参数正文，检查与完成记录同目录，均不进入业务文件。
+自动执行依赖宿主加载规则及 AI 遵循指令，不能当成程序硬门限。缺少源码、冲突或无法核实的内容必须保留为未知，不能为了通过检查而伪造同步成功。
